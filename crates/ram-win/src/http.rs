@@ -13,7 +13,8 @@ use windows::Win32::Networking::WinHttp::{
     WINHTTP_ADDREQ_FLAG_REPLACE, WINHTTP_DISABLE_COOKIES, WINHTTP_DISABLE_REDIRECTS,
     WINHTTP_FLAG_SECURE, WINHTTP_INTERNET_SCHEME_HTTPS, WINHTTP_OPTION_DISABLE_FEATURE,
     WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP,
-    WINHTTP_QUERY_CUSTOM, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
+    WINHTTP_QUERY_CUSTOM, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_RAW_HEADERS_CRLF,
+    WINHTTP_QUERY_STATUS_CODE,
 };
 
 use crate::util::{code_of, from_wide, wide};
@@ -21,7 +22,7 @@ use crate::util::{code_of, from_wide, wide};
 /// Largest response body accepted.
 pub const MAX_BODY: usize = 1024 * 1024;
 
-const USER_AGENT: &str = "Waypoint";
+const USER_AGENT: &str = "RAM";
 
 /// Owns a WinHTTP handle.
 struct Internet(*mut c_void);
@@ -292,6 +293,8 @@ impl HttpApi for WinHttp {
             .and_then(|()| parse_retry_after(&from_wide(&buf)))
         };
 
+        let headers = read_raw_headers(request.0);
+
         let mut response = Vec::new();
         let mut chunk = vec![0u8; 16 * 1024];
         loop {
@@ -317,9 +320,51 @@ impl HttpApi for WinHttp {
         Ok(HttpResponse {
             status: status as u16,
             retry_after,
+            headers,
             body: response,
         })
     }
+}
+
+/// Reads all response headers as (lowercased name, value) pairs.
+fn read_raw_headers(request: *mut c_void) -> Vec<(String, String)> {
+    let mut size = 0u32;
+    // First call sizes the buffer (it fails with ERROR_INSUFFICIENT_BUFFER).
+    unsafe {
+        let _ = WinHttpQueryHeaders(
+            request,
+            WINHTTP_QUERY_RAW_HEADERS_CRLF,
+            PCWSTR::null(),
+            None,
+            &mut size,
+            std::ptr::null_mut(),
+        );
+    }
+    if size == 0 || size as usize > 256 * 1024 {
+        return Vec::new();
+    }
+    let mut buf = vec![0u16; size as usize / 2 + 1];
+    let ok = unsafe {
+        WinHttpQueryHeaders(
+            request,
+            WINHTTP_QUERY_RAW_HEADERS_CRLF,
+            PCWSTR::null(),
+            Some(buf.as_mut_ptr() as *mut c_void),
+            &mut size,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok.is_err() {
+        return Vec::new();
+    }
+    let text = from_wide(&buf);
+    // The first line is the status line; each header is "Name: Value".
+    text.split("\r\n")
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .filter(|(k, _)| !k.is_empty())
+        .collect()
 }
 
 #[cfg(test)]

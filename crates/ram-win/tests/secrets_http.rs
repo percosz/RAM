@@ -14,7 +14,7 @@ impl Drop for Cleanup<'_> {
 
 #[test]
 fn secrets_round_trip_with_test_prefix() {
-    let store = WinSecrets::with_prefix("WaypointTest/");
+    let store = WinSecrets::with_prefix("RAMTest/");
     let name = format!("round-trip-{}", std::process::id());
     let _cleanup = Cleanup(&store, &name);
 
@@ -29,7 +29,7 @@ fn secrets_round_trip_with_test_prefix() {
     assert_eq!(store.get(&name), Ok(Some(b"replaced".to_vec())));
 
     // A different prefix is a different namespace.
-    let elsewhere = WinSecrets::with_prefix("WaypointTestOther/");
+    let elsewhere = WinSecrets::with_prefix("RAMTestOther/");
     assert_eq!(elsewhere.get(&name), Ok(None));
 
     assert!(store.set(&name, &vec![0u8; 2561]).is_err(), "over the blob limit");

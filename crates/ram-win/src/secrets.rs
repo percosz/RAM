@@ -29,9 +29,9 @@ impl Default for WinSecrets {
 }
 
 impl WinSecrets {
-    /// Uses target names of the form `Waypoint/<name>`.
+    /// Uses target names of the form `RAM/<name>`.
     pub fn new() -> Self {
-        Self::with_prefix("Waypoint/")
+        Self::with_prefix("RAM/")
     }
 
     /// Uses target names of the form `<prefix><name>`.
@@ -85,7 +85,7 @@ impl SecretStore for WinSecrets {
             )));
         }
         let mut target = self.target(name)?;
-        let mut user = wide("Waypoint");
+        let mut user = wide("RAM");
         let credential = CREDENTIALW {
             Type: CRED_TYPE_GENERIC,
             TargetName: PWSTR(target.as_mut_ptr()),
