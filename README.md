@@ -12,6 +12,8 @@ by ic3w0lf22 (see [NOTICE.md](NOTICE.md)). It is not affiliated with Roblox.
 
 ![RAM](crates/ram-app/assets/RAM-256.png)
 
+![Accounts view](docs/screenshot-accounts.png)
+
 ## Highlights
 
 - **Encrypted cookie vault.** Session cookies are encrypted at rest with
