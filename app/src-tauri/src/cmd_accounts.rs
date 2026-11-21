@@ -156,9 +156,10 @@ pub fn app_version() -> String {
 /// `RAM_SELECT_FIRST` selects the first account, so screenshots need no
 /// simulated input. Both are empty in normal use.
 #[tauri::command]
-pub fn start_hint() -> (String, bool) {
+pub fn start_hint() -> (String, bool, String) {
     (
         std::env::var("RAM_START_VIEW").unwrap_or_default(),
         std::env::var("RAM_SELECT_FIRST").map(|v| v == "1").unwrap_or(false),
+        std::env::var("RAM_START_DIALOG").unwrap_or_default(),
     )
 }

@@ -50,7 +50,9 @@ handler, which is what the "on this PC" notes refer to.
 | Feature | Status | Needs live test | Notes |
 |---|---|---|---|
 | Add an account by signing in inside your browser (cookie captured into the vault) | Conditional | **Yes** | Open Browser without a cookie shows roblox.com/login in that account's profile; Capture session reads the cookie back over DevTools. The mechanism is tested with a fake cookie (see Open Browser); a real Roblox sign-in, CAPTCHA and 2-step pages included, was not performed. |
-| Add an account by pasting `.ROBLOSECURITY` | Verified | No | The cookie is checked right after it is stored. |
+| Add an account by pasting `.ROBLOSECURITY` | Conditional | Yes | RAM asks Roblox whose cookie it is and creates or refreshes that account; the line parser (bare value, `.ROBLOSECURITY=`, `user:pass:cookie`, `username:password` refused) is unit-tested. |
+| Add many at once (cookies one per line) | Conditional | Yes | Sequential, 0.7 s apart, with a progress count and a per-line problem list. |
+| Sign in with Roblox (Add dialog): the browser opens on the sign-in page, RAM polls for the session and captures it | Conditional | **Yes** | Uses the same DevTools mechanism as Open Browser on a `sign-in` profile that is signed out after capture; a real sign-in was not performed. |
 | Login check (RoALT's method): `GET users.roblox.com/v1/users/authenticated` | Conditional | **Yes** | Classification unit-tested on scripted responses: 200 valid; 401 signed out; 401 + error 9002/2 *bound session required*; 403 + `rblx-challenge-id` *verification required*; 429 and transport errors leave the state untouched. Not run against live Roblox. |
 | Rotated cookie from `Set-Cookie` replaces the stored one | Conditional | Yes | Unit-tested on a scripted response. |
 | Robux and Premium shown next to the account | Conditional | Yes | Economy and premium-features endpoints; unit-tested on scripted responses. |

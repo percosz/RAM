@@ -3,6 +3,7 @@
 pub mod client_settings;
 pub mod clientlog;
 pub mod clients;
+pub mod cookies;
 pub mod export;
 pub mod fakes;
 pub mod import;

@@ -104,6 +104,10 @@ export interface Snapshot {
   github_repo: string;
 }
 
+export interface Adopted { account: Account; added: boolean; }
+export interface ManyResult { added: number; refreshed: number; repeated: number; failed: number; problems: string[]; }
+export type SignInPoll = { state: "waiting" } | { state: "closed" } | ({ state: "done" } & Adopted);
+
 export interface UpdateInfo { version: string; notes: string; date: string; }
 export interface UpdateProgress { got: number; total: number; done: boolean; }
 
@@ -143,9 +147,15 @@ export interface PlanItem { index: number; kind: string; label: string; detail: 
 export interface PlanView { folder: string; items: PlanItem[]; notices: string[]; add: number; update: number; unchanged: number; skip: number; cookies_available: number; }
 
 export const api = {
-  startHint: () => invoke<[string, boolean]>("start_hint"),
+  startHint: () => invoke<[string, boolean, string]>("start_hint"),
   snapshot: () => invoke<Snapshot>("snapshot"),
   addAccount: (username: string, alias: string) => invoke<Account>("add_account", { username, alias }),
+  addByCookie: (cookie: string, alias: string) => invoke<Adopted>("add_by_cookie", { cookie, alias }),
+  addMany: (text: string) => invoke<ManyResult>("add_many", { text }),
+  signinStart: () => invoke<string>("signin_start"),
+  signinPoll: () => invoke<SignInPoll>("signin_poll"),
+  signinCancel: () => invoke<void>("signin_cancel"),
+  onAddManyProgress: (cb: (p: { done: number; total: number }) => void): Promise<UnlistenFn> => listen<{ done: number; total: number }>("add-many-progress", (e) => cb(e.payload)),
   updateAccount: (patch: AccountPatch) => invoke<Account>("update_account", { patch }),
   removeAccounts: (ids: number[]) => invoke<void>("remove_accounts", { ids }),
   setMain: (id: number | null) => invoke<void>("set_main", { id }),

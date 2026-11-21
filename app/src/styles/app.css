@@ -93,7 +93,7 @@
 .accent-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .accent-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
 .accent-dot.active { border-color: var(--text); }
-.kv { display: grid; grid-template-columns: 160px 1fr; gap: 8px 12px; align-items: center; }
+.kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 12px; align-items: center; }
 .kv .input, .kv .select { width: 100%; }
 .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); width: max-content; max-width: 100%; flex-wrap: wrap; }
 .seg button { height: 26px; padding: 0 12px; border: 0; border-radius: calc(var(--radius-sm) - 2px); background: transparent; color: var(--muted); cursor: pointer; font-size: 12.5px; white-space: nowrap; }

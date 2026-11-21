@@ -7,6 +7,7 @@ after an update; the release body on GitHub is generated from it.
 ## 0.3.0 (2026-11-21)
 
 ### New
+- **Add an account** the RoALT way: *Sign in with Roblox* opens your browser on Roblox's sign-in page and RAM captures the session by itself; *Paste a cookie*; *Add many at once* (cookies one per line, `user:pass:cookie` lines keep the cookie). The username comes from Roblox. The vault can be set up with one click from the dialog.
 - Roblox headshots in the account list and details (public thumbnails API, refreshed daily).
 - **Open Browser** opens your default browser (Brave, Chrome, Edge, Vivaldi) signed in as the account, each account in its own browser profile. The profile's cookies are wiped when the window closes; the vault stays the only store.
 - Tick boxes on every row and group header: pick any set of accounts without holding Shift or Ctrl.

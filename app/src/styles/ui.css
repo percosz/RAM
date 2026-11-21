@@ -89,5 +89,8 @@
 .table tbody tr.main td:first-child { color: var(--accent); }
 
 .empty { display: grid; place-items: center; height: 100%; color: var(--muted); text-align: center; padding: 24px; }
+.gate { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--warn-wash); border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.dot.pulse { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
 .empty b { color: var(--text); font-weight: 600; }
 .kbd { display: inline-block; padding: 0 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; font-size: 11px; font-family: var(--mono); background: var(--surface-2); }

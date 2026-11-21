@@ -84,7 +84,6 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
-          args: --locked
 
       - name: Portable zip
         shell: pwsh

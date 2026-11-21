@@ -72,6 +72,13 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
   const allOn = selectable.length > 0 && selectable.every((id) => selected.includes(id));
   const someOn = selected.length > 0 && !allOn;
 
+  // Dev hook for screenshots: RAM_START_DIALOG=add|import opens a dialog.
+  useEffect(() => {
+    const on = (e: Event) => { const d = (e as CustomEvent<string>).detail; if (d === "add" || d === "import") setDialog({ kind: d }); };
+    window.addEventListener("ram-start-dialog", on);
+    return () => window.removeEventListener("ram-start-dialog", on);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
@@ -247,7 +254,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
         <div className="lhint">{placeHint}{selected.length > 0 && <span className="muted"> · {selected.length} selected</span>}</div>
       </div>
 
-      {dialog?.kind === "add" && <AddAccountDialog onClose={() => setDialog(null)} />}
+      {dialog?.kind === "add" && <AddAccountDialog onClose={() => setDialog(null)} onImport={() => setDialog({ kind: "import" })} />}
       {dialog?.kind === "import" && <ImportDialog onClose={() => setDialog(null)} />}
       {dialog?.kind === "cookie" && <SetCookieDialog id={dialog.id} name={accounts.find((a) => a.id === dialog.id)?.username ?? ""} onClose={() => setDialog(null)} />}
       {dialog?.kind === "reveal" && <RevealCookieDialog id={dialog.id} name={accounts.find((a) => a.id === dialog.id)?.username ?? ""} needPassword={snap?.vault.mode === "password" && !snap.vault.hello_available} onClose={() => setDialog(null)} />}

@@ -1,8 +1,9 @@
 // Modal flows: add account, set/reveal cookie, vault setup/unlock/change, import, confirm.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { open as pickDialog } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { Download, ExternalLink } from "lucide-react";
 import { api, type PlanView } from "./api";
 import { Btn, Field, Modal, Toggle } from "./components";
 import { useApp } from "./store";
@@ -19,25 +20,153 @@ export function ConfirmDialog({ title, text, danger, onYes, onClose }: { title: 
   );
 }
 
-export function AddAccountDialog({ onClose }: { onClose: () => void }) {
-  const { refresh, toast, setSelected } = useApp();
-  const [username, setUsername] = useState("");
+/** Shows its children only when cookies can be stored; otherwise offers to
+ *  set up the vault (Windows account, one click) or unlock it. */
+export function VaultGate({ children, what }: { children: ReactNode; what: string }) {
+  const { snap, refresh, toast } = useApp();
+  const [unlock, setUnlock] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const v = snap?.vault;
+  if (!v) return null;
+  if (!v.configured) {
+    return (
+      <div className="gate">
+        <p style={{ margin: 0 }}><b>Set up the cookie vault first.</b> {what} are encrypted at rest and never written to the plain data file.</p>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <Btn kind="primary" disabled={busy} onClick={async () => { setBusy(true); try { await api.vaultSetupDpapi(); await refresh(); toast("Vault ready (Windows account).", "good"); } catch (e) { toast(errText(e), "bad"); } finally { setBusy(false); } }}>Protect with my Windows account</Btn>
+          <span className="hint">Unlocks automatically for your Windows user, unreadable on any other PC. Prefer a master password? Settings → Security.</span>
+        </div>
+      </div>
+    );
+  }
+  if (!v.unlocked) {
+    return (
+      <div className="gate">
+        <p style={{ margin: 0 }}><b>The vault is locked.</b> Unlock it to store {what.toLowerCase()}.</p>
+        <div><Btn kind="primary" onClick={() => setUnlock(true)}>Unlock…</Btn></div>
+        {unlock && <VaultUnlockDialog onClose={() => { setUnlock(false); void refresh(); }} />}
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
+type AddTab = "signin" | "cookie" | "many";
+
+/** RoALT-style Add account: sign in with Roblox in your own browser, paste
+ *  a cookie, or paste many at once. The username comes from Roblox. */
+export function AddAccountDialog({ onClose, onImport }: { onClose: () => void; onImport: () => void }) {
+  const { refresh, toast, setSelected, snap } = useApp();
+  const [tab, setTab] = useState<AddTab>("signin");
+  const [cookie, setCookie] = useState("");
   const [alias, setAlias] = useState("");
+  const [many, setMany] = useState("");
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const submit = async () => {
-    try {
-      const a = await api.addAccount(username, alias);
-      await refresh();
-      setSelected([a.id]);
-      toast(`Added ${a.username}. Add a cookie, or open the browser and sign in.`, "good");
-      onClose();
-    } catch (e) { setErr(errText(e)); }
+  const [waiting, setWaiting] = useState<string | null>(null); // browser name while the sign-in window is open
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [result, setResult] = useState<import("./api").ManyResult | null>(null);
+  const browser = snap?.browser_name || "";
+
+  // Poll the sign-in window until a session is captured or it is closed.
+  useEffect(() => {
+    if (!waiting) return;
+    let alive = true;
+    const t = window.setInterval(async () => {
+      try {
+        const p = await api.signinPoll();
+        if (!alive) return;
+        if (p.state === "done") {
+          setWaiting(null);
+          await refresh();
+          setSelected([p.account.id]);
+          toast(`${p.added ? "Added" : "Refreshed"} ${p.account.username}.`, "good");
+          onClose();
+        } else if (p.state === "closed") {
+          setWaiting(null);
+          setErr("The sign-in window was closed before a sign-in happened.");
+        }
+      } catch (e) { if (alive) { setWaiting(null); setErr(errText(e)); } }
+    }, 1500);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [waiting, refresh, setSelected, toast, onClose]);
+
+  const startSignIn = async () => {
+    setErr("");
+    try { const name = await api.signinStart(); setWaiting(name); } catch (e) { setErr(errText(e)); }
   };
+  const cancelSignIn = async () => { await api.signinCancel().catch(() => {}); setWaiting(null); };
+  const submitCookie = async () => {
+    setBusy(true); setErr("");
+    try {
+      const a = await api.addByCookie(cookie, alias);
+      await refresh(); setSelected([a.account.id]);
+      toast(`${a.added ? "Added" : "Refreshed"} ${a.account.username}.`, "good");
+      onClose();
+    } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  const submitMany = async () => {
+    setBusy(true); setErr(""); setResult(null); setProgress({ done: 0, total: many.split(/\r?\n/).filter((l) => l.trim()).length });
+    const un = await api.onAddManyProgress(setProgress);
+    try {
+      const r = await api.addMany(many);
+      setResult(r); await refresh();
+      if (r.added + r.refreshed > 0) toast(`Import: ${r.added} added, ${r.refreshed} refreshed${r.failed ? `, ${r.failed} failed` : ""}.`, r.failed ? "warn" : "good");
+      if (r.failed === 0) { setMany(""); }
+    } catch (e) { setErr(errText(e)); } finally { un(); setBusy(false); setProgress(null); }
+  };
+  const close = () => { if (waiting) void api.signinCancel().catch(() => {}); onClose(); };
+
   return (
-    <Modal title="Add account" onClose={onClose} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind="primary" onClick={submit} disabled={username.trim().length < 3}>Add</Btn></>}>
-      <p className="muted" style={{ margin: 0 }}>RAM stores the name now. Sign in through <b>Open Browser</b> and capture the session, or paste a cookie.</p>
-      <Field label="Roblox username"><input className="input" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="Exactly as it appears on Roblox" /></Field>
-      <Field label="Alias (optional)"><input className="input" value={alias} onChange={(e) => setAlias(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="A name only you see" /></Field>
+    <Modal title="Add an account" onClose={close} wide
+      footer={<>
+        <Btn onClick={close}>{result && result.added + result.refreshed > 0 ? "Done" : "Cancel"}</Btn>
+        {tab === "cookie" && <Btn kind="primary" onClick={submitCookie} disabled={busy || cookie.trim().length < 32}>Add</Btn>}
+        {tab === "many" && <Btn kind="primary" onClick={submitMany} disabled={busy || !many.trim()}>{busy && progress ? `Importing ${progress.done} of ${progress.total}…` : "Import"}</Btn>}
+      </>}>
+      <p className="muted" style={{ margin: 0 }}>Cookies are encrypted and stay on this PC. RAM asks Roblox whose session it is, so you never type the username.</p>
+      <div className="seg">
+        <button type="button" className={tab === "signin" ? "active" : ""} onClick={() => setTab("signin")}>Sign in with Roblox</button>
+        <button type="button" className={tab === "cookie" ? "active" : ""} onClick={() => setTab("cookie")}>Paste a cookie</button>
+        <button type="button" className={tab === "many" ? "active" : ""} onClick={() => setTab("many")}>Add many at once</button>
+      </div>
+      <VaultGate what="Cookies">
+        {tab === "signin" && (
+          <>
+            <p className="muted" style={{ margin: 0 }}>{browser ? `A ${browser} window opens on Roblox's sign-in page, in a browser profile of its own. Passkeys and 2-step verification work there. The session is deleted from that profile once RAM has it.` : "No Chromium-based browser (Brave, Chrome, Edge, Vivaldi) is installed, so the sign-in window cannot open. Paste a cookie instead."}</p>
+            {waiting ? (
+              <div className="row" style={{ gap: 10 }}><span className="dot pulse" /><span>Waiting for you to finish signing in in {waiting}…</span><span className="grow" /><Btn sm onClick={cancelSignIn}>Cancel</Btn></div>
+            ) : (
+              <div><Btn kind="primary" onClick={startSignIn} disabled={!browser}><ExternalLink />Open Roblox sign-in</Btn></div>
+            )}
+          </>
+        )}
+        {tab === "cookie" && (
+          <>
+            <Field label=".ROBLOSECURITY cookie" hint="The raw value or .ROBLOSECURITY=… both work. Anyone with this cookie can sign in as you; never paste it anywhere else.">
+              <input className="input mono" type="password" autoFocus value={cookie} onChange={(e) => setCookie(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitCookie()} placeholder="_|WARNING:-DO-NOT-SHARE-THIS…" />
+            </Field>
+            <Field label="Alias (optional)"><input className="input" value={alias} onChange={(e) => setAlias(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitCookie()} placeholder="A name only you see" /></Field>
+          </>
+        )}
+        {tab === "many" && (
+          <>
+            <Field label="Cookies, one per line" hint="user:pass:cookie lines from another manager keep only the cookie. username:password lines are skipped: RAM never signs in with passwords; use Sign in with Roblox for those.">
+              <textarea className="textarea mono" rows={7} value={many} onChange={(e) => setMany(e.target.value)} placeholder={"_|WARNING:-DO-NOT-SHARE-THIS…\n_|WARNING:-DO-NOT-SHARE-THIS…"} spellCheck={false} />
+            </Field>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <Btn onClick={() => { onClose(); onImport(); }}><Download />Import from Roblox Account Manager…</Btn>
+              <span className="hint">Its AccountData.json, with its cookies moved into the vault.</span>
+            </div>
+            {result && (
+              <div className="hint">
+                {result.added} added, {result.refreshed} refreshed, {result.repeated} repeated, {result.failed} failed.
+                {result.problems.length > 0 && <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{result.problems.slice(0, 12).map((p, i) => <li key={i}>{p}</li>)}{result.problems.length > 12 && <li>…and {result.problems.length - 12} more</li>}</ul>}
+              </div>
+            )}
+          </>
+        )}
+      </VaultGate>
       {err && <div className="bad">{err}</div>}
     </Modal>
   );
@@ -226,7 +355,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             <span>{plan.cookies_available} cookie{plan.cookies_available === 1 ? "" : "s"} in file</span>
           </div>
           {plan.cookies_available > 0 && (
-            <Toggle checked={withCookies && vaultOk} onChange={setWithCookies} label="Also move the cookies into the vault" hint={vaultOk ? "Accounts already in RAM get their cookie too, and every account with a cookie is checked right away." : "Unlock (or set up) the vault first to import cookies."} />
+            vaultOk
+              ? <Toggle checked={withCookies} onChange={setWithCookies} label={`Also move the ${plan.cookies_available} cookie${plan.cookies_available === 1 ? "" : "s"} into the vault`} hint="Accounts already in RAM get their cookie too, and every account with a cookie is checked right away." />
+              : <VaultGate what="Imported cookies"><span /></VaultGate>
           )}
           <div style={{ maxHeight: 340, overflow: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
             <table className="table">

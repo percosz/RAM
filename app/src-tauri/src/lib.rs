@@ -1,6 +1,7 @@
 //! RAM Tauri shell: wires the Rust core to the React front-end.
 
 mod cmd_accounts;
+mod cmd_add;
 mod cmd_browser;
 mod cmd_diag;
 mod cmd_io;
@@ -53,6 +54,11 @@ pub fn run() {
             cmd_launch::place_info,
             cmd_launch::launch,
             cmd_launch::follow,
+            cmd_add::add_by_cookie,
+            cmd_add::add_many,
+            cmd_add::signin_start,
+            cmd_add::signin_poll,
+            cmd_add::signin_cancel,
             cmd_browser::open_browser,
             cmd_browser::browser_capture,
             cmd_browser::browser_clear,

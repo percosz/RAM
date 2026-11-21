@@ -25,9 +25,10 @@ function Shell() {
   useEffect(() => {
     if (hinted || !snap) return;
     setHinted(true);
-    api.startHint().then(([v, first]) => {
+    api.startHint().then(([v, first, dialog]) => {
       if (v === "clients" || v === "settings" || v === "accounts" || v === "diagnostics") setView(v);
       if (first && snap.accounts.length) setSelected([snap.accounts[0]!.id]);
+      if (dialog) window.dispatchEvent(new CustomEvent("ram-start-dialog", { detail: dialog }));
     }).catch(() => {});
   }, [snap, hinted, setSelected]);
   const valid = accounts.filter((a) => a.sign_in.state === "Verified").length;

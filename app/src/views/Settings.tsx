@@ -104,7 +104,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
           </Field>
           <div className="kv">
             <span>Rows</span>
-            <Seg value={settings.density} options={[["Compact", "Compact"], ["Normal", "Normal"], ["Comfortable", "Comfortable"], ["Large", "Large"]]} onChange={(d) => saveSettings({ density: d })} />
+            <Seg sm value={settings.density} options={[["Compact", "Compact"], ["Normal", "Normal"], ["Comfortable", "Comfortable"], ["Large", "Large"]]} onChange={(d) => saveSettings({ density: d })} />
             <span />
             <div className="hint">Compact shows one line per account; the others show the alias and description underneath.</div>
           </div>
@@ -133,7 +133,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
         <div className="card-h">Performance — alt clients</div>
         <div className="card-b">
           <div className="hint">
-            Lower each alt client's FPS and graphics the way RoALT does. The FPS cap and quality go into Roblox's own settings file; rendering flags go into the FastFlag file {snap.launcher_name === "Roblox" ? "next to the client" : `${snap.launcher_name} applies at launch`}. Both are written just before a client starts and put back as soon as it has read them, so your own Roblox keeps its settings.
+            Lower each alt client's FPS and graphics. The FPS cap and quality go into Roblox's own settings file; rendering flags go into the FastFlag file {snap.launcher_name === "Roblox" ? "next to the client" : `${snap.launcher_name} applies at launch`}. Both are written just before a client starts and put back as soon as it has read them, so your own Roblox keeps its settings.
             {mainName ? <> <b>{mainName}</b> is Main and is never touched.</> : <> Mark your own account as <b>Main</b> so it is never touched.</>}
           </div>
           <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
