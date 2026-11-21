@@ -6,6 +6,9 @@ with one click, keep every session cookie in an encrypted vault, open your
 own browser already signed in as any account, run several clients at once,
 and keep the alts light on your PC.
 
+
+this is vibe coded!!!!!!!!! if you dont like it then i recomend using ic3wolfs account manager. this project aims to add a lot of qol while being faithful to the original. this is pretty decent for 23s and just regular use, i didnt like the old account manager because its ugly
+
 [![Latest release](https://img.shields.io/github/v/release/percosz/RAM?label=download&color=cba6f7)](https://github.com/percosz/RAM/releases/latest)
 [![Build](https://github.com/percosz/RAM/actions/workflows/release.yml/badge.svg)](https://github.com/percosz/RAM/actions/workflows/release.yml)
 [![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
