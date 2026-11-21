@@ -25,6 +25,8 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{IsWindowVisible, PostMessageW, WM_CLOSE};
 
+use windows::Win32::System::Threading::GetExitCodeProcess;
+
 use crate::gpu::GpuSampler;
 use crate::util::{
     code_of, file_name, from_wide, image_path, last_error, map_err, open_process, open_verified,
@@ -38,6 +40,29 @@ pub const DESKTOP_IMAGE: &str = "RobloxPlayerBeta.exe";
 pub const STORE_IMAGE: &str = "Windows10Universal.exe";
 /// Package-family fragment that identifies the Store client's install path.
 pub const STORE_PATH_MARKER: &str = "ROBLOXCORPORATION";
+
+/// `GetExitCodeProcess` value of a process that is still running.
+const STILL_ACTIVE: u32 = 259;
+
+/// A query-only handle to one process, kept so its exit code can be read
+/// after it has ended (the code is gone once the last handle closes). It
+/// grants nothing but reading basic facts about the process.
+pub struct ExitWatch(Handle);
+
+impl ExitWatch {
+    /// Opens the running process identified by `key`; `None` when it is
+    /// already gone or cannot be opened.
+    pub fn open(key: ProcKey) -> Option<Self> {
+        open_verified(key, PROCESS_QUERY_LIMITED_INFORMATION).ok().map(ExitWatch)
+    }
+
+    /// The exit code once the process has ended; `None` while it runs.
+    pub fn exit_code(&self) -> Option<u32> {
+        let mut code = 0u32;
+        unsafe { GetExitCodeProcess(self.0.raw(), &mut code) }.ok()?;
+        (code != STILL_ACTIVE).then_some(code)
+    }
+}
 
 const ERROR_NOT_SUPPORTED: u32 = 50;
 const ERROR_INVALID_FUNCTION: u32 = 1;

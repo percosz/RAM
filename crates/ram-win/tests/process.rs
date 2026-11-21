@@ -197,6 +197,23 @@ fn request_close_without_a_window_is_not_found_and_harmless() {
 }
 
 #[test]
+fn exit_watch_reads_the_code_after_the_process_ended() {
+    let procs = ping_processes();
+    let mut child = spawn_idle();
+    let key = key_of(&procs, &child);
+    let watch = ram_win::process::ExitWatch::open(key).expect("running process opens");
+    assert_eq!(watch.exit_code(), None, "still running");
+    // Ended from outside, the way Task Manager does it: code 1, not an
+    // exception code.
+    child.kill();
+    let code = watch.exit_code().expect("code is kept while the handle is open");
+    assert_eq!(code, 1);
+    assert!(!ram_core::clientlog::exit_is_crash(code));
+    // A process that is already gone cannot be opened for watching.
+    assert!(ram_win::process::ExitWatch::open(key).is_none());
+}
+
+#[test]
 fn exited_process_is_not_found() {
     let procs = ping_processes();
     let mut child = spawn_idle();

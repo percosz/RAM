@@ -23,8 +23,10 @@ the migration target: the importer reads what 3.7.2 writes.
 - **RAM now handles Roblox passwords, on request.** Users of the legacy app
   rely on bulk `username:password` import, so v0.4 adds it, but as a queue:
   one account at a time in the user's own browser, on Roblox's own sign-in
-  page, filled and submitted over DevTools (`Runtime.evaluate` with the
-  values embedded as JSON literals), with the user solving any check. RAM
+  page, typed in and submitted over DevTools (`Input.insertText` after the
+  page has finished loading, a read-back check, Enter, then a real mouse
+  click on Sign in as the fallback; v0.4.0 assigned the values from script,
+  which Roblox's form often ignored), with the user solving any check. RAM
   never posts credentials to Roblox itself. The legacy app opened every
   account at once; a queue keeps each sign-in looking like a person and lets
   a wrong password be skipped. Passwords are kept only when "Save passwords"

@@ -141,15 +141,22 @@ pub fn kind_label(k: EndKind) -> &'static str {
 /// Order: a closing marker (RAM closed it, the client shut down, or the
 /// client left on its own) wins, as `Replaced` when the client left because
 /// the account signed in elsewhere; then a refused sign-in before joining;
-/// then a crash dump; then a server-side disconnect. A client that never got
-/// in game and exited within 5 s is `Closed` (an early exit such as the
-/// updater relaunching a newer binary or a launch RAM cancelled), after 5 s
-/// it is `Crashed`. A client that was in game and silently vanished `Crashed`.
+/// then a crash dump; then a server-side disconnect. After that the process
+/// exit code decides, when it is known: an exception code is `Crashed`, and
+/// anything else is `Closed`, because a client that is ended from outside
+/// (Task Manager's End task, a bootstrapper or another tool killing it)
+/// stops mid-line with no closing marker and no dump, exactly like a crash,
+/// and only the exit code tells the two apart. Without an exit code, a
+/// client that never got in game and exited within 5 s is `Closed` (an early
+/// exit such as the updater relaunching a newer binary or a launch RAM
+/// cancelled), after 5 s it is `Crashed`, and a client that was in game and
+/// silently vanished is `Crashed`.
 pub fn classify(
     f: &LogFacts,
     process_exited: bool,
     crash_dump_seen: bool,
     closed_by_ram: bool,
+    exit_code: Option<u32>,
 ) -> Option<EndKind> {
     if !process_exited {
         return None;
@@ -166,10 +173,27 @@ pub fn classify(
     if f.disconnected {
         return Some(EndKind::Disconnected);
     }
+    if let Some(code) = exit_code {
+        return Some(if exit_is_crash(code) { EndKind::Crashed } else { EndKind::Closed });
+    }
     if !f.in_game {
         return Some(if f.last_secs > 5.0 { EndKind::Crashed } else { EndKind::Closed });
     }
     Some(EndKind::Crashed)
+}
+
+/// Whether a Windows process exit code is an unhandled exception or a hang.
+///
+/// A crash ends the process with an NTSTATUS of warning or error severity
+/// (`0xC0000005` access violation, `0xC0000409` stack buffer overrun,
+/// `0x80000003` breakpoint, `0xE06D7363` C++ exception, `0xCFFFFFFF` hang
+/// ended by Windows). A process that is ended by someone carries the code
+/// that caller chose: `1` from Task Manager and `taskkill`, `0xFFFFFFFF` from
+/// .NET's `Process.Kill` (bootstrappers, PowerShell), and `0xC000013A` when
+/// a console is closed. A normal exit is `0`.
+pub fn exit_is_crash(code: u32) -> bool {
+    const CONTROL_C_EXIT: u32 = 0xC000_013A;
+    (0x8000_0000..0xF000_0000).contains(&code) && code != CONTROL_C_EXIT
 }
 
 /// Folds one complete line (without its newline) into `f`.
@@ -600,8 +624,8 @@ mod tests {
         assert_eq!(f.joined_at, Some(1.4));
         assert!(f.read_settings);
         assert_eq!(f.last_secs, 90.0);
-        assert_eq!(classify(&f, true, false, false), Some(EndKind::Disconnected));
-        assert_eq!(classify(&f, false, false, false), None);
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::Disconnected));
+        assert_eq!(classify(&f, false, false, false, None), None);
     }
 
     #[test]
@@ -622,9 +646,9 @@ mod tests {
         assert!(f.in_game);
         assert!(!f.disconnected);
         assert_eq!(f.place_id, Some(5208655184));
-        assert_eq!(classify(&f, false, false, false), None);
+        assert_eq!(classify(&f, false, false, false, None), None);
         // Vanishing after the teleport is a crash, not the teleport's disconnect.
-        assert_eq!(classify(&f, true, false, false), Some(EndKind::Crashed));
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::Crashed));
     }
 
     #[test]
@@ -636,7 +660,7 @@ mod tests {
         let f = facts(&text);
         assert!(f.left && f.disconnected && !f.replaced);
         assert_eq!(f.reason.as_deref(), Some("Sending disconnect with reason: 285"));
-        assert_eq!(classify(&f, true, false, false), Some(EndKind::Closed));
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::Closed));
     }
 
     #[test]
@@ -646,12 +670,12 @@ mod tests {
             + &l(50.0, "Network", "Lost connection with reason : Same account launched elsewhere");
         let f = facts(&text);
         assert!(f.left && f.replaced);
-        assert_eq!(classify(&f, true, false, false), Some(EndKind::Replaced));
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::Replaced));
 
         let text = join_line(1.4)
             + &in_game_lines(2.4)
             + &l(50.0, "Network", "Disconnection Notification. Reason: 273");
-        assert_eq!(classify(&facts(&text), true, false, false), Some(EndKind::Replaced));
+        assert_eq!(classify(&facts(&text), true, false, false, None), Some(EndKind::Replaced));
     }
 
     #[test]
@@ -662,17 +686,46 @@ mod tests {
             + &l(224.3, "Network", "Time to disconnect replication data: 1.845500");
         let f = facts(&text);
         assert!(f.shutdown);
-        assert_eq!(classify(&f, true, false, false), Some(EndKind::Closed));
-        assert_eq!(classify(&f, true, true, false), Some(EndKind::Closed));
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::Closed));
+        assert_eq!(classify(&f, true, true, false, None), Some(EndKind::Closed));
     }
 
     #[test]
     fn never_joined_depends_on_lifetime() {
         let early = facts(&l(2.0, "RobloxStarter", "Starting module: Network"));
-        assert_eq!(classify(&early, true, false, false), Some(EndKind::Closed));
+        assert_eq!(classify(&early, true, false, false, None), Some(EndKind::Closed));
         let late = facts(&l(40.0, "RobloxStarter", "Starting module: Network"));
-        assert_eq!(classify(&late, true, false, false), Some(EndKind::Crashed));
-        assert_eq!(classify(&late, true, false, true), Some(EndKind::Closed));
+        assert_eq!(classify(&late, true, false, false, None), Some(EndKind::Crashed));
+        assert_eq!(classify(&late, true, false, true, None), Some(EndKind::Closed));
+    }
+
+    #[test]
+    fn exit_code_tells_a_kill_from_a_crash() {
+        // In game, the log simply stops: no closing marker, no dump.
+        let f = facts(&(join_line(1.4) + &in_game_lines(2.4) + &l(5339.1, "CreatorOutput", "2")));
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::Crashed));
+        // Ended from outside: Task Manager (1), .NET Process.Kill (-1), exit(0).
+        for code in [0, 1, 0xFFFF_FFFF, 0xC000_013A, 0x4001_0004] {
+            assert!(!exit_is_crash(code), "{code:#x}");
+            assert_eq!(classify(&f, true, false, false, Some(code)), Some(EndKind::Closed), "{code:#x}");
+        }
+        // Unhandled exceptions and a hang ended by Windows.
+        for code in [0xC000_0005, 0xC000_0409, 0x8000_0003, 0xE06D_7363, 0xCFFF_FFFF, 0xC000_001D] {
+            assert!(exit_is_crash(code), "{code:#x}");
+            assert_eq!(classify(&f, true, false, false, Some(code)), Some(EndKind::Crashed), "{code:#x}");
+        }
+        // A crash dump is a crash whatever the code says; the log's own
+        // markers still win over the code.
+        assert_eq!(classify(&f, true, true, false, Some(1)), Some(EndKind::Crashed));
+        let dropped = facts(&(join_line(1.4) + &in_game_lines(2.4) + &l(90.0, "Network", "Connection closed by server for reason: 288")));
+        assert_eq!(classify(&dropped, true, false, false, Some(1)), Some(EndKind::Disconnected));
+        let shut = facts(&(join_line(1.4) + &in_game_lines(2.4) + &l(90.0, "SingleSurfaceApp", "shutDown: (stage:UGCGame).")));
+        assert_eq!(classify(&shut, true, false, false, Some(0xC000_0005)), Some(EndKind::Closed));
+        // Never joined, ended from outside after a long wait: closed, not crashed.
+        let late = facts(&l(40.0, "RobloxStarter", "Starting module: Network"));
+        assert_eq!(classify(&late, true, false, false, Some(1)), Some(EndKind::Closed));
+        assert_eq!(classify(&late, true, false, false, Some(0xC000_0005)), Some(EndKind::Crashed));
+        assert_eq!(classify(&f, false, false, false, Some(1)), None);
     }
 
     #[test]
@@ -681,7 +734,7 @@ mod tests {
             + &l(1.2, "Auth", "An error was encountered during authentication. Error Code: 403");
         let f = facts(&text);
         assert!(f.auth_failed && !f.in_game);
-        assert_eq!(classify(&f, true, false, false), Some(EndKind::SignedOut));
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::SignedOut));
         // After joining the same text is just chatter.
         let f = facts(&(join_line(1.0) + &in_game_lines(2.0) + &l(3.0, "Auth", "Error Code: 403")));
         assert!(!f.auth_failed);
@@ -709,7 +762,7 @@ mod tests {
             Some("Connection closed by server for reason: RCC: 288 (DisconnectServerShutdown)")
         );
         assert!(!f.reason_is_weak);
-        assert_eq!(classify(&f, true, false, false), Some(EndKind::Disconnected));
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::Disconnected));
     }
 
     #[test]
@@ -724,7 +777,7 @@ mod tests {
         assert!(!f.disconnected && !f.left && !f.shutdown && !f.challenged);
         assert_eq!(f.browser_tracker_id, None);
         assert_eq!(f.last_secs, 5.3);
-        assert_eq!(classify(&f, true, false, false), Some(EndKind::Crashed));
+        assert_eq!(classify(&f, true, false, false, None), Some(EndKind::Crashed));
         // The licence banner and continuation lines carry no prefix and are skipped.
         let f = facts("[FLog::Output] All use of Roblox services must comply.\n    \"Disconnection Notification\": 1\n");
         assert_eq!(f, LogFacts::default());

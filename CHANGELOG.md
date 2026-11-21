@@ -4,6 +4,16 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.4.1 (2026-11-21)
+
+### New
+- **Update prompt on launch.** When a newer RAM is out, a dialog says so a moment after start, with the release notes and two choices: **Update now** or **Later**. Later keeps the "available" button in the sidebar for the rest of the session.
+
+### Fixed
+- **The sign-in queue types the login for real.** It used to set the fields from page script, which Roblox's page often ignored or wiped while it was still loading, and Sign in was not pressed. RAM now waits until the page and the form are fully loaded, types the username and password through the browser's own input channel, checks that both stuck (and types again if the page cleared them), presses Enter, and clicks Sign in with a real mouse click if the form did not react.
+- **The automatic update check often never ran.** Its timer was cancelled by the first refresh of the account list after start, so a new version was only found by pressing "Check now".
+- **A client you closed yourself was recorded as a crash** when it was ended from outside the game window (Task Manager's End task, a bootstrapper or another tool closing it). Such a client stops without a closing line in its log, exactly like a crash; RAM now reads the process exit code and only records a crash for a real exception, a hang, or a crash dump. The exit code is written to the debug log.
+
 ## 0.4.0 (2026-11-21)
 
 ### New

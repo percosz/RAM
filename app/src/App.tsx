@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Users, Activity, Settings as SettingsIcon, Lock, Unlock, ShieldOff, Stethoscope, ArrowDownToLine } from "lucide-react";
 import { api } from "./api";
 import { AppProvider, useApp } from "./store";
@@ -20,6 +20,17 @@ function Shell() {
   const [unlock, setUnlock] = useState(false);
   const [showUpdate, setShowUpdate] = useState(false);
   const vault = snap?.vault;
+  // A new version found at launch is announced once: Update now or Later.
+  // One found hours into a session only lights the sidebar pill, so a
+  // dialog never lands on top of whatever the user is doing.
+  const born = useRef(Date.now());
+  const announced = useRef(false);
+  useEffect(() => {
+    if (announced.current || !update || update.state !== "available") return;
+    if (Date.now() - born.current > 120_000) return;
+    announced.current = true;
+    setShowUpdate(true);
+  }, [update]);
   // The webview's own right-click menu (Back, Refresh, Print) has no place
   // in an app; text fields keep theirs for copy and paste.
   useEffect(() => {

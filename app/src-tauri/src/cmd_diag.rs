@@ -35,6 +35,9 @@ pub struct Watch {
     /// Crash dumps present when the client started, to spot a new one.
     pub dumps_at_start: usize,
     pub closed_by_ram: bool,
+    /// Kept open so the exit code can be read once the client is gone: it
+    /// is what tells "ended from outside" from a crash.
+    pub exit: Option<ram_win::process::ExitWatch>,
     /// What the limits have done to this client so far.
     pub limits: Applied,
 }
@@ -248,7 +251,7 @@ fn tick(app: &AppHandle) {
             tail.as_ref().map(|t| t.path.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_else(|| "not found yet".into()),
             account
         ));
-        s.diag.watched.insert(key, Watch { account, started, tail, facts: LogFacts::default(), browser_tracker_id: btid, dumps_at_start: dumps, closed_by_ram: false, limits: Applied::default() });
+        s.diag.watched.insert(key, Watch { account, started, tail, facts: LogFacts::default(), browser_tracker_id: btid, dumps_at_start: dumps, closed_by_ram: false, exit: ram_win::process::ExitWatch::open(key), limits: Applied::default() });
         if let Some(id) = account {
             seen_running.push(id);
         }
@@ -403,14 +406,16 @@ fn tick(app: &AppHandle) {
             s.diag.reads.insert(b.clone(), true);
         }
         let dump = count_dumps(w.started) > w.dumps_at_start;
-        let kind = clientlog::classify(&w.facts, true, dump, w.closed_by_ram);
+        let exit_code = w.exit.as_ref().and_then(|e| e.exit_code());
+        let kind = clientlog::classify(&w.facts, true, dump, w.closed_by_ram, exit_code);
         let username = w.account.and_then(|id| s.store.account(id)).map(|a| a.username.clone()).unwrap_or_default();
         let uptime = (t - w.started).max(0);
         s.log.info(&format!(
-            "client {} ({}) ended after {uptime}s: {:?}{}",
+            "client {} ({}) ended after {uptime}s: {:?} (exit code {}){}",
             key.pid,
             if username.is_empty() { "unknown account" } else { &username },
             kind,
+            exit_code.map(|c| format!("{c:#x}")).unwrap_or_else(|| "unknown".into()),
             w.facts.reason.as_deref().map(|r| format!(" — {r}")).unwrap_or_default()
         ));
         let Some(kind) = kind else { continue };

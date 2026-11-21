@@ -1095,41 +1095,74 @@ pub enum LoginFill {
     NoForm,
 }
 
-/// The script that fills Roblox's sign-in form. The values are embedded as
-/// JSON string literals, so no character in a password can break out.
-fn login_script(username: &str, password: &str, submit: bool) -> String {
-    let u = serde_json::to_string(username).unwrap_or_else(|_| "\"\"".into());
-    let p = serde_json::to_string(password).unwrap_or_else(|_| "\"\"".into());
-    format!(
-        r#"(async (u, p, submit) => {{
-  const wait = (sel, ms) => new Promise((res) => {{
-    const t0 = Date.now();
-    const tick = () => {{ const el = document.querySelector(sel); if (el) return res(el); if (Date.now() - t0 > ms) return res(null); setTimeout(tick, 150); }};
-    tick();
-  }});
-  const user = await wait('#login-username', 7000);
-  const pass = user ? await wait('#login-password', 1500) : null;
-  if (!user || !pass) return 'no-form';
-  const set = (el, v) => {{
-    const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-    el.focus(); d.set.call(el, v);
-    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-  }};
-  set(user, u); set(pass, p);
-  if (!submit) return 'filled';
-  await new Promise((r) => setTimeout(r, 250));
-  const form = user.closest('form');
+/// Finds the sign-in form's parts; used by every step below.
+const FORM_JS: &str = r#"
+  const user = document.querySelector('#login-username');
+  const pass = document.querySelector('#login-password');
+  const form = user && user.closest('form');
   const btn = document.querySelector('#login-button') || (form && form.querySelector('button[type="submit"]'));
-  if (btn) {{ btn.click(); return 'submitted'; }}
-  return 'filled';
-}})({u}, {p}, {submit})"#
-    )
+"#;
+
+fn json_str(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into())
+}
+
+/// Evaluates an expression in the attached page and returns its value.
+/// Protocol errors never carry the expression (it can hold the password).
+fn eval(cdp: &mut Cdp, session: &str, expression: String) -> Result<Value, String> {
+    let r = cdp
+        .call_in(Some(session), "Runtime.evaluate", json!({ "expression": expression, "awaitPromise": true, "returnByValue": true }))
+        .map_err(|_| "the sign-in page did not answer".to_string())?;
+    Ok(r.get("result").and_then(|r| r.get("value")).cloned().unwrap_or(Value::Null))
+}
+
+/// Focuses `selector`, empties it and types `text` through the browser's
+/// own input pipeline (`Input.insertText`), which the page receives as real
+/// typing: trusted `beforeinput`/`input` events that React-style forms act
+/// on, unlike values assigned from script.
+fn type_into(cdp: &mut Cdp, session: &str, selector: &str, text: &str) -> Result<(), String> {
+    let focus = format!(
+        "(() => {{ const el = document.querySelector({sel}); if (!el) return false; el.scrollIntoView({{ block: 'center' }}); el.focus(); el.select(); \
+         const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(el, ''); \
+         el.dispatchEvent(new Event('input', {{ bubbles: true }})); return document.activeElement === el; }})()",
+        sel = json_str(selector)
+    );
+    if eval(cdp, session, focus)? != Value::Bool(true) {
+        return Err("the sign-in field could not be focused".into());
+    }
+    cdp.call_in(Some(session), "Input.insertText", json!({ "text": text })).map_err(|_| "typing into the sign-in form failed".to_string())?;
+    Ok(())
+}
+
+fn press_enter(cdp: &mut Cdp, session: &str) {
+    for kind in ["keyDown", "keyUp"] {
+        let mut ev = json!({ "type": kind, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13 });
+        if kind == "keyDown" {
+            ev["text"] = json!("\r");
+            ev["unmodifiedText"] = json!("\r");
+        }
+        let _ = cdp.call_in(Some(session), "Input.dispatchKeyEvent", ev);
+    }
+}
+
+/// Clicks at page coordinates with real mouse events.
+fn click_at(cdp: &mut Cdp, session: &str, x: f64, y: f64) {
+    for (kind, buttons) in [("mouseMoved", 0), ("mousePressed", 1), ("mouseReleased", 0)] {
+        let _ = cdp.call_in(
+            Some(session),
+            "Input.dispatchMouseEvent",
+            json!({ "type": kind, "x": x, "y": y, "button": if kind == "mouseMoved" { "none" } else { "left" }, "buttons": buttons, "clickCount": if kind == "mouseMoved" { 0 } else { 1 } }),
+        );
+    }
 }
 
 /// Fills (and optionally submits) Roblox's sign-in form in the tab showing
-/// it. The password travels only over the browser's loopback DevTools
-/// socket; it is never part of an error string.
+/// it, the way a person would: waits until the page has finished loading
+/// and the form is there, types both fields, checks the text arrived
+/// (retyping if the page wiped it while starting up), then presses Enter
+/// and, if the form did not react, clicks Sign in with a real mouse click.
+/// The password travels only over the browser's loopback DevTools socket;
+/// it is never part of an error string.
 pub fn fill_login(profile_dir: &Path, username: &str, password: &str, submit: bool) -> Result<LoginFill, String> {
     let mut cdp = Cdp::connect(profile_dir).map_err(|_| "The browser window is not open".to_string())?;
     let list = cdp.call("Target.getTargets", json!({}))?;
@@ -1149,20 +1182,85 @@ pub fn fill_login(profile_dir: &Path, username: &str, password: &str, submit: bo
         .ok_or("The sign-in page is not open")?;
     let attached = cdp.call("Target.attachToTarget", json!({ "targetId": target, "flatten": true }))?;
     let session = attached.get("sessionId").and_then(Value::as_str).ok_or("could not attach to the sign-in page")?.to_string();
-    let result = cdp.call_in(
-        Some(&session),
-        "Runtime.evaluate",
-        json!({ "expression": login_script(username, password, submit), "awaitPromise": true, "returnByValue": true }),
-    );
+    let result = fill_attached(&mut cdp, &session, username, password, submit);
     let _ = cdp.call("Target.detachFromTarget", json!({ "sessionId": session }));
     cdp.close();
-    // Never surface the protocol error text: it can echo the expression.
-    let value = result.map_err(|_| "the sign-in form could not be filled".to_string())?;
-    Ok(match value.get("result").and_then(|r| r.get("value")).and_then(Value::as_str) {
-        Some("submitted") => LoginFill::Submitted,
-        Some("filled") => LoginFill::Filled,
-        _ => LoginFill::NoForm,
-    })
+    result
+}
+
+fn fill_attached(cdp: &mut Cdp, session: &str, username: &str, password: &str, submit: bool) -> Result<LoginFill, String> {
+    // Typing goes to the focused page; make the page count as focused even
+    // when its window is behind another one.
+    let _ = cdp.call_in(Some(session), "Emulation.setFocusEmulationEnabled", json!({ "enabled": true }));
+    let _ = cdp.call_in(Some(session), "Page.bringToFront", json!({}));
+
+    // 1. Wait for the page to finish loading with the whole form present.
+    let ready = format!("(() => {{ {FORM_JS} return document.readyState === 'complete' && !!user && !!pass && !!btn; }})()");
+    let deadline = Instant::now() + Duration::from_secs(25);
+    loop {
+        if eval(cdp, session, ready.clone())? == Value::Bool(true) {
+            break;
+        }
+        if Instant::now() > deadline {
+            return Ok(LoginFill::NoForm);
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    // The form's script attaches a moment after the markup; typing earlier
+    // is what used to be thrown away.
+    std::thread::sleep(Duration::from_millis(900));
+
+    // 2. Type both fields and check they hold what was typed.
+    let check = format!(
+        "(() => {{ {FORM_JS} return !!user && !!pass && user.value === {u} && pass.value === {p}; }})()",
+        u = json_str(username),
+        p = json_str(password)
+    );
+    let mut typed = false;
+    for attempt in 0..4 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(700));
+        }
+        type_into(cdp, session, "#login-username", username)?;
+        std::thread::sleep(Duration::from_millis(150));
+        type_into(cdp, session, "#login-password", password)?;
+        std::thread::sleep(Duration::from_millis(350));
+        if eval(cdp, session, check.clone())? == Value::Bool(true) {
+            typed = true;
+            break;
+        }
+    }
+    if !typed {
+        return Ok(LoginFill::NoForm);
+    }
+    if !submit {
+        return Ok(LoginFill::Filled);
+    }
+
+    // 3. Submit: Enter in the password field, as a person would.
+    let arm = "(() => { window.__ramSubmitted = false; document.addEventListener('submit', () => { window.__ramSubmitted = true; }, { capture: true, once: true }); \
+               const p = document.querySelector('#login-password'); if (p) p.focus(); return true; })()";
+    let _ = eval(cdp, session, arm.to_string())?;
+    press_enter(cdp, session);
+    std::thread::sleep(Duration::from_millis(900));
+    let submitted = "(() => window.__ramSubmitted === true || !document.querySelector('#login-password'))()";
+    if eval(cdp, session, submitted.to_string())? == Value::Bool(true) {
+        return Ok(LoginFill::Submitted);
+    }
+    // 4. The form did not react to Enter: click the button for real.
+    let rect = format!(
+        "(() => {{ {FORM_JS} if (!btn) return null; btn.scrollIntoView({{ block: 'center' }}); const r = btn.getBoundingClientRect(); \
+         return {{ x: r.left + r.width / 2, y: r.top + r.height / 2, disabled: !!btn.disabled }}; }})()"
+    );
+    let r = eval(cdp, session, rect)?;
+    if let (Some(x), Some(y)) = (r.get("x").and_then(Value::as_f64), r.get("y").and_then(Value::as_f64)) {
+        click_at(cdp, session, x, y);
+        std::thread::sleep(Duration::from_millis(900));
+        if eval(cdp, session, submitted.to_string())? == Value::Bool(true) {
+            return Ok(LoginFill::Submitted);
+        }
+    }
+    Ok(LoginFill::Filled)
 }
 
 #[cfg(test)]
@@ -1170,16 +1268,18 @@ mod login_tests {
     use super::*;
 
     #[test]
-    fn login_script_embeds_values_as_json_literals() {
-        let s = login_script("bob_1", "p\"a'ss\\word\n</script>", true);
-        assert!(s.contains("(\"bob_1\", \"p\\\"a'ss\\\\word\\n</script>\", true)"), "{s}");
-        assert!(s.contains("#login-username") && s.contains("button[type=\"submit\"]"));
-        assert!(login_script("a", "b", false).ends_with("(\"a\", \"b\", false)"));
+    fn values_are_embedded_as_json_literals() {
+        assert_eq!(json_str("p\"a'ss\\word\n</script>"), "\"p\\\"a'ss\\\\word\\n</script>\"");
+        assert!(FORM_JS.contains("#login-username") && FORM_JS.contains("button[type=\"submit\"]"));
     }
 
     /// Opens a real Chromium browser on a scratch profile showing a local
-    /// stand-in for Roblox's sign-in form (same field ids), fills and submits
-    /// it, and reads back what the page received. Never touches roblox.com.
+    /// stand-in for Roblox's sign-in form that behaves the way a React form
+    /// does: the Sign in button stays disabled until *trusted* input events
+    /// have filled both fields, and the form's script only attaches a
+    /// moment after load (text typed before that is wiped). The filler must
+    /// type both values, see them stick, and get the form submitted. Never
+    /// touches roblox.com.
     #[test]
     #[ignore = "opens a browser window"]
     fn fill_login_round_trip() {
@@ -1188,11 +1288,24 @@ mod login_tests {
             _ => known_chromium_browsers().into_iter().next().expect("a Chromium browser"),
         };
         let dir = std::env::temp_dir().join(format!("ram-login-test-{}", std::process::id()));
-        let page = "data:text/html,<title>form</title><form name=loginForm onsubmit=\"document.title='ok-'+document.getElementById('login-username').value+'-'+document.getElementById('login-password').value.length;return false\"><input id=login-username><input id=login-password type=password><button type=submit>Sign in</button></form>";
+        let page = concat!(
+            "data:text/html,<title>form</title>",
+            "<form name=loginForm><input id=login-username><input id=login-password type=password>",
+            "<button type=submit disabled>Sign in</button></form>",
+            "<script>",
+            "const u=document.getElementById('login-username'),p=document.getElementById('login-password'),b=document.querySelector('button'),f=document.forms[0];",
+            "let seen={u:false,p:false};",
+            // Late hydration: wipe anything typed too early, then start listening.
+            "setTimeout(()=>{u.value='';p.value='';",
+            "u.addEventListener('input',e=>{if(e.isTrusted)seen.u=true;b.disabled=!(seen.u%26%26seen.p%26%26u.value%26%26p.value)});",
+            "p.addEventListener('input',e=>{if(e.isTrusted)seen.p=true;b.disabled=!(seen.u%26%26seen.p%26%26u.value%26%26p.value)});",
+            "f.addEventListener('submit',e=>{e.preventDefault();document.title='ok-'+u.value+'-'+p.value.length});",
+            "},600);",
+            "</script>"
+        );
         let session = open_signed_in(&browser, &dir, None, page, "test").expect("browser opens");
         // Collect everything first, then always close the browser, then
         // assert: a failed assertion must not leave a browser running.
-        std::thread::sleep(Duration::from_millis(800));
         let got = fill_login(&dir, "bob_1", "p\"a'ss word", true);
         std::thread::sleep(Duration::from_millis(400));
         let titles = |dir: &Path| -> Vec<String> {

@@ -87,7 +87,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [update, setUpdate] = useState<UpdateOffer | null>(null);
   const [crashCount, setCrashCount] = useState(0);
   const toastId = useRef(1);
-  const checkedOnce = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -190,15 +189,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { unsubs.forEach((u) => u()); mq.removeEventListener("change", onScheme); window.clearInterval(tick); };
   }, [refresh, toast]);
 
-  // One quiet update check after start, then every 6 hours, when enabled.
+  // An update check right after start, then every 6 hours, when enabled.
+  // Keyed on the setting alone: keyed on the whole snapshot, the first
+  // refresh after start (the account checks) cancelled the timer and the
+  // check never ran.
+  const autoCheck = !!snap?.settings.check_updates;
   useEffect(() => {
-    if (!snap || checkedOnce.current) return;
-    checkedOnce.current = true;
-    if (!snap.settings.check_updates) return;
-    const t = window.setTimeout(() => { void checkForUpdate(false); }, 4000);
+    if (!autoCheck) return;
+    const t = window.setTimeout(() => { void checkForUpdate(false); }, 1500);
     const every = window.setInterval(() => { void checkForUpdate(false); }, 6 * 3600 * 1000);
     return () => { window.clearTimeout(t); window.clearInterval(every); };
-  }, [snap, checkForUpdate]);
+  }, [autoCheck, checkForUpdate]);
 
   const hideNames = !!snap?.settings.hide_usernames;
   const nameOf = useCallback((username: string) => maskName(username, hideNames), [hideNames]);

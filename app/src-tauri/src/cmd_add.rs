@@ -399,9 +399,14 @@ fn sign_in_one(app: &AppHandle, dir: &std::path::Path, item: &QueueItem, save_pa
         return Outcome::Failed(e);
     }
     emit_queue(app, &item.username, "filling", "Filling in the sign-in form…");
+    // The filler waits for the page and the form itself (up to 25 s), types
+    // both fields, checks them and submits; one more try covers a page that
+    // reloaded underneath it.
     let mut filled = LoginFill::NoForm;
-    for _ in 0..3 {
-        std::thread::sleep(Duration::from_millis(900));
+    for attempt in 0..2 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(1500));
+        }
         match sysbrowser::fill_login(dir, &item.username, &item.password, true) {
             Ok(LoginFill::NoForm) => continue,
             Ok(f) => {
@@ -413,8 +418,8 @@ fn sign_in_one(app: &AppHandle, dir: &std::path::Path, item: &QueueItem, save_pa
     }
     let hint = match filled {
         LoginFill::Submitted => format!("Signing in… solve any check in the {} window.", browser.name),
-        LoginFill::Filled => format!("Filled in. Press Sign in in the {} window.", browser.name),
-        LoginFill::NoForm => format!("The form did not appear. Sign in by hand in the {} window, or skip.", browser.name),
+        LoginFill::Filled => format!("Typed in, but the page did not take Sign in. Press Sign in in the {} window.", browser.name),
+        LoginFill::NoForm => format!("The sign-in form could not be filled. Sign in by hand in the {} window, or skip.", browser.name),
     };
     emit_queue(app, &item.username, "waiting", hint);
     let started = Instant::now();

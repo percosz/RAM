@@ -1,6 +1,7 @@
-// The update offer (a small dialog from the sidebar pill) and the one-time
-// "What's new" after an update. Nothing here blocks the app: the pill waits
-// until clicked, and What's new is dismissed with one click.
+// The update offer and the one-time "What's new" after an update. The offer
+// opens by itself when a new version is found at launch (Update now or
+// Later) and from the sidebar pill, which stays after "Later" so the update
+// is one click away for the rest of the session.
 
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
@@ -12,8 +13,8 @@ export function Notes({ text }: { text: string }) {
   const out: ReactNode[] = [];
   let list: ReactNode[] = [];
   const flush = () => { if (list.length) { out.push(<ul key={`ul${out.length}`}>{list}</ul>); list = []; } };
-  const inline = (s: string): ReactNode[] => s.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean).map((p, i) =>
-    p.startsWith("`") ? <code key={i} className="mono">{p.slice(1, -1)}</code> : p.startsWith("**") ? <b key={i}>{p.slice(2, -2)}</b> : <span key={i}>{p}</span>);
+  const inline = (s: string): ReactNode[] => s.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g).filter(Boolean).map((p, i) =>
+    p.startsWith("`") ? <code key={i} className="mono">{p.slice(1, -1)}</code> : p.startsWith("**") ? <b key={i}>{p.slice(2, -2)}</b> : p.startsWith("*") && p.length > 2 ? <i key={i}>{p.slice(1, -1)}</i> : <span key={i}>{p}</span>);
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
@@ -29,20 +30,21 @@ export function Notes({ text }: { text: string }) {
 }
 
 export function UpdateDialog({ onClose }: { onClose: () => void }) {
-  const { update, installUpdate, dismissUpdate, snap } = useApp();
+  const { update, installUpdate, snap } = useApp();
   if (!update) return null;
   const busy = update.state === "downloading" || update.state === "installing";
   const running = snap?.accounts.filter((a) => a.client === "Running").length ?? 0;
   const RELEASES = `https://github.com/${snap?.github_repo ?? ""}/releases`;
   return (
-    <Modal title={`RAM ${update.version} is available`} onClose={busy ? () => {} : onClose} wide
+    <Modal title={`Update available: RAM ${update.version}`} onClose={busy ? () => {} : onClose} wide
       footer={<>
-        {!busy && <Btn onClick={() => { dismissUpdate(); onClose(); }}>Later</Btn>}
+        {!busy && <Btn onClick={onClose}>Later</Btn>}
         {update.portable
           ? <Btn kind="primary" onClick={() => api.openUrl(RELEASES).catch(() => {})}>Open the release page</Btn>
           : <Btn kind="primary" onClick={installUpdate} disabled={busy}>{update.state === "downloading" ? `Downloading… ${Math.round(update.progress * 100)}%` : update.state === "installing" ? "Installing…" : "Update now"}</Btn>}
       </>}>
       <p className="muted" style={{ margin: 0 }}>
+        You have RAM {snap?.version}.{" "}
         {update.portable
           ? "This copy of RAM runs from a folder (no installer), so it cannot update itself. Download the new version from the release page and replace RAM.exe."
           : `RAM downloads the signed installer from GitHub, closes, installs, and starts again by itself.${running ? ` ${running} Roblox client${running === 1 ? "" : "s"} keep running.` : ""}`}
