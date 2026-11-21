@@ -1,5 +1,7 @@
 ﻿//! Platform-independent core of RAM.
 
+pub mod client_settings;
+pub mod clientlog;
 pub mod clients;
 pub mod export;
 pub mod fakes;

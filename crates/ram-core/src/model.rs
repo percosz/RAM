@@ -31,6 +31,13 @@ pub struct Store {
     /// Account-to-client links, kept so a restart does not lose them.
     pub links: Vec<crate::clients::ClientLink>,
     pub imports: Vec<ImportRecord>,
+    /// FPS cap, graphics quality and rendering flags for alt clients.
+    pub graphics: crate::client_settings::GraphicsSettings,
+    /// How clients ended, newest first.
+    pub crashes: Vec<CrashRecord>,
+    /// The user's own `GlobalBasicSettings` values while a launch has ours
+    /// in place, so a crash mid-launch can still put them back.
+    pub xml_undo: Option<crate::client_settings::XmlUndo>,
 }
 
 impl Default for Store {
@@ -48,6 +55,9 @@ impl Default for Store {
             applied: Vec::new(),
             links: Vec::new(),
             imports: Vec::new(),
+            graphics: Default::default(),
+            crashes: Vec::new(),
+            xml_undo: None,
         };
         s.ensure_builtin_games();
         s
@@ -73,6 +83,8 @@ impl Store {
                     name: "Rogue Lineage".to_string(),
                     pinned: true,
                     builtin: true,
+                    creator: String::new(),
+                    fetched_at: None,
                 },
             );
         }
@@ -117,6 +129,24 @@ impl Store {
         self.recent.insert(0, entry);
         self.recent.truncate(RECENT_LIMIT);
     }
+
+    /// Adds a crash-history record (newest first) and returns its id.
+    pub fn push_crash(&mut self, mut record: CrashRecord) -> u64 {
+        let id = self.alloc_id();
+        record.id = id;
+        self.crashes.insert(0, record);
+        self.crashes.truncate(CRASH_LIMIT);
+        id
+    }
+
+    /// Per-account graphics inputs for a launch.
+    pub fn account_graphics(&self, id: AccountId) -> crate::client_settings::AccountGraphics {
+        let a = self.account(id);
+        crate::client_settings::AccountGraphics {
+            fps_cap: a.and_then(|a| a.fps_cap),
+            full_quality: a.map(|a| a.full_quality).unwrap_or(false),
+        }
+    }
 }
 
 pub const RECENT_LIMIT: usize = 30;
@@ -157,6 +187,19 @@ pub struct Account {
     /// Premium membership at the last cookie check, when fetched.
     #[serde(default)]
     pub premium: Option<bool>,
+    /// Headshot image URL from the public thumbnails API, and when it was
+    /// fetched (the URLs expire, so they are refreshed daily).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub avatar_at: Option<i64>,
+    /// FPS cap for this account's client; `None` uses the global cap.
+    #[serde(default)]
+    pub fps_cap: Option<u32>,
+    /// Keep the user's own graphics quality for this account (the FPS cap
+    /// still applies). Main is always exempt from everything.
+    #[serde(default)]
+    pub full_quality: bool,
 }
 
 impl Default for Account {
@@ -180,6 +223,10 @@ impl Default for Account {
             display_name: String::new(),
             robux: None,
             premium: None,
+            avatar_url: None,
+            avatar_at: None,
+            fps_cap: None,
+            full_quality: false,
         }
     }
 }
@@ -261,11 +308,17 @@ pub struct Game {
     pub pinned: bool,
     /// Built-in entries cannot be removed.
     pub builtin: bool,
+    /// Creator name from the games API, when looked up.
+    #[serde(default)]
+    pub creator: String,
+    /// When the name was last confirmed with Roblox.
+    #[serde(default)]
+    pub fetched_at: Option<i64>,
 }
 
 impl Default for Game {
     fn default() -> Self {
-        Game { place_id: 0, universe_id: None, name: String::new(), pinned: false, builtin: false }
+        Game { place_id: 0, universe_id: None, name: String::new(), pinned: false, builtin: false, creator: String::new(), fetched_at: None }
     }
 }
 
@@ -397,21 +450,27 @@ impl ThemeKind {
     }
 }
 
-/// How the Accounts screen is laid out.
+/// Row height of the account list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum LayoutMode {
-    /// The modern screen: avatars, grouped list, details card, legend bar.
+pub enum Density {
+    /// One line per account.
+    Compact,
+    /// Two lines: name, then alias and description.
     #[default]
-    Modern,
-    /// The classic dense table with an inline quick-launch toolbar.
-    Classic,
+    Normal,
+    /// Two lines with more air and a larger avatar.
+    Comfortable,
+    /// Big avatar, big type.
+    Large,
 }
 
-impl LayoutMode {
+impl Density {
     pub fn label(self) -> &'static str {
         match self {
-            LayoutMode::Modern => "Modern",
-            LayoutMode::Classic => "Classic",
+            Density::Compact => "Compact",
+            Density::Normal => "Normal",
+            Density::Comfortable => "Comfortable",
+            Density::Large => "Large",
         }
     }
 }
@@ -429,38 +488,28 @@ pub struct Settings {
     pub theme: ThemeKind,
     /// Custom accent as 0xRRGGBB; `None` uses the theme's accent.
     pub accent: Option<u32>,
-    pub compact: bool,
-    /// Modern or classic Accounts layout.
-    #[serde(default)]
-    pub layout: LayoutMode,
+    /// Row size of the account list.
+    pub density: Density,
     /// Corner radius for panels, buttons and fields, in device pixels.
     #[serde(default = "default_corner")]
     pub corner_radius: i32,
-    /// Launch the client directly with a stored cookie when the vault is
-    /// unlocked, instead of handing off to the browser.
-    #[serde(default = "yes")]
-    pub direct_launch: bool,
     /// Hold the Roblox singleton object so several clients can run at once.
     #[serde(default = "yes")]
     pub multi_instance: bool,
-    /// Launch handoffs in flight at once.
-    pub launch_concurrency: u32,
     /// Minimum seconds between two handoffs in a batch.
     pub launch_spacing_secs: u32,
     /// Seconds a handoff waits for a new client before it is marked Failed.
     pub launch_timeout_secs: u32,
     /// Whether batch actions and Select All include the Main account.
     pub include_main_in_batch: bool,
-    /// Client ID of the user's own Roblox OAuth application; enables
-    /// verified sign-in checks. Not a secret.
-    pub oauth_client_id: String,
-    pub oauth_port: u16,
-    /// Minutes of no manager-observed attention before an idle reminder.
-    /// 0 disables reminders.
-    pub idle_reminder_minutes: u32,
+    /// Look for a new RAM release on GitHub at start-up.
+    #[serde(default = "yes")]
+    pub check_updates: bool,
+    /// Version whose release notes the user has already seen, so "What's
+    /// new" shows once per update.
+    pub seen_version: String,
     pub window: Option<Rect>,
     pub last_import_dir: String,
-    pub default_destination: Option<DestinationId>,
 }
 
 impl Default for Settings {
@@ -468,21 +517,16 @@ impl Default for Settings {
         Settings {
             theme: ThemeKind::System,
             accent: None,
-            compact: false,
-            layout: LayoutMode::Modern,
+            density: Density::Normal,
             corner_radius: default_corner(),
-            direct_launch: true,
             multi_instance: true,
-            launch_concurrency: 1,
             launch_spacing_secs: 8,
             launch_timeout_secs: 90,
             include_main_in_batch: false,
-            oauth_client_id: String::new(),
-            oauth_port: 53682,
-            idle_reminder_minutes: 0,
+            check_updates: true,
+            seen_version: String::new(),
             window: None,
             last_import_dir: String::new(),
-            default_destination: None,
         }
     }
 }
@@ -558,6 +602,43 @@ pub struct AppliedOverride {
     /// Window placement before tiling.
     pub original_rect: Option<Rect>,
 }
+
+/// How a Roblox client ended, as seen in its log (Diagnostics → Crash
+/// history). The newest `CRASH_LIMIT` are kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CrashRecord {
+    pub id: u64,
+    pub account: Option<AccountId>,
+    /// Username at the time, so the record reads well after the account is removed.
+    pub username: String,
+    pub kind: crate::clientlog::EndKind,
+    pub at: i64,
+    pub uptime_secs: i64,
+    pub reason: String,
+    pub place_id: Option<u64>,
+    pub log_path: Option<String>,
+    pub pid: u32,
+}
+
+impl Default for CrashRecord {
+    fn default() -> Self {
+        CrashRecord {
+            id: 0,
+            account: None,
+            username: String::new(),
+            kind: crate::clientlog::EndKind::Closed,
+            at: 0,
+            uptime_secs: 0,
+            reason: String::new(),
+            place_id: None,
+            log_path: None,
+            pid: 0,
+        }
+    }
+}
+
+pub const CRASH_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportRecord {

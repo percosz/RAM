@@ -24,6 +24,8 @@ pub struct AppState {
     pub procs: WinProcesses,
     /// Accounts with a check in flight.
     pub checking: HashSet<AccountId>,
+    /// Client watcher state (Diagnostics).
+    pub diag: crate::cmd_diag::DiagState,
 }
 
 pub type Shared = Mutex<AppState>;
@@ -46,6 +48,7 @@ impl AppState {
             .unwrap_or_else(|| PathBuf::from("."));
         let _ = std::fs::create_dir_all(&data_dir);
         let log = Log::new(data_dir.join("RAM.log"));
+        log.info(&format!("RAM {} starting", env!("CARGO_PKG_VERSION")));
         let store_file = StoreFile::new(data_dir.join("store.json"));
         let mut startup_note = String::new();
         let mut read_only = false;
@@ -56,24 +59,25 @@ impl AppState {
                         "The data file could not be read; the last backup was loaded. The unreadable file was kept as {}.",
                         preserved_as.display()
                     );
+                    log.warn(&startup_note);
                 }
                 loaded.store
             }
             Err(e) => {
                 read_only = matches!(e, StoreError::NewerVersion { .. });
                 startup_note = format!("{e}");
-                log.line(now(), &format!("store load: {e}"));
+                log.error(&format!("store load: {e}"));
                 Store::default()
             }
         };
         let vault_path = data_dir.join("vault.bin");
         let mut vault = Vault::open(&vault_path).unwrap_or_else(|e| {
-            log.line(now(), &format!("vault load: {e}"));
+            log.error(&format!("vault load: {e}"));
             Vault::new_unconfigured(&vault_path)
         });
         if vault.is_configured() && vault.mode() == Some(VaultMode::Dpapi) {
             if let Err(e) = vault.unlock_dpapi(&WinProtector, now()) {
-                log.line(now(), &format!("vault auto-unlock: {e}"));
+                log.warn(&format!("vault auto-unlock: {e}"));
             }
         }
         let mut state = AppState {
@@ -88,9 +92,34 @@ impl AppState {
             clients: Clients::new(),
             procs: WinProcesses::new(),
             checking: HashSet::new(),
+            diag: Default::default(),
         };
         state.apply_multi_instance();
+        state.restore_client_settings();
+        crate::cmd_browser::sweep_profiles(&state.data_dir);
         state
+    }
+
+    /// Puts back any client settings a previous run left in place (a crash
+    /// mid-launch), and undoes values a client saved back after we restored.
+    pub fn restore_client_settings(&mut self) {
+        use ram_core::client_settings;
+        let paths = ram_win::launcher_info::all_flag_files();
+        for msg in client_settings::restore_leftovers(&paths) {
+            self.log.warn(&format!("flag restore: {msg}"));
+        }
+        if let Some(undo) = self.store.xml_undo.clone() {
+            match client_settings::settle(&undo.path, &undo) {
+                Ok(wrote) => {
+                    if wrote {
+                        self.log.info("restored your own Roblox graphics settings left over from the last run");
+                    }
+                    self.store.xml_undo = None;
+                    self.save();
+                }
+                Err(e) => self.log.warn(&format!("settings restore: {e}")),
+            }
+        }
     }
 
     pub fn save(&mut self) {
@@ -99,12 +128,8 @@ impl AppState {
         }
         self.store.links = self.clients.links().to_vec();
         if let Err(e) = self.store_file.save(&self.store) {
-            self.log.line(now(), &format!("save failed: {e}"));
+            self.log.error(&format!("save failed: {e}"));
         }
-    }
-
-    pub fn log(&self, message: &str) {
-        self.log.line(now(), message);
     }
 
     pub fn apply_multi_instance(&mut self) {
@@ -113,11 +138,13 @@ impl AppState {
                 match ram_win::multi_instance::hold() {
                     Ok(h) => {
                         if !h.is_held() {
-                            self.log("multi-instance: another process already holds the Roblox singleton");
+                            self.log.warn("multi-instance: another process already holds the Roblox singleton");
+                        } else {
+                            self.log.info("multi-instance: holding the Roblox singleton");
                         }
                         self.singleton = Some(h);
                     }
-                    Err(e) => self.log(&format!("multi-instance unavailable: {e}")),
+                    Err(e) => self.log.warn(&format!("multi-instance unavailable: {e}")),
                 }
             }
         } else {

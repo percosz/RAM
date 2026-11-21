@@ -128,7 +128,58 @@ fn mask_bearer(text: &str) -> String {
     out
 }
 
-/// Append-only log file with a size cap. Every line is redacted.
+/// Severity of a log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Level {
+    pub fn tag(self) -> &'static str {
+        match self {
+            Level::Debug => "DEBUG",
+            Level::Info => "INFO",
+            Level::Warn => "WARN",
+            Level::Error => "ERROR",
+        }
+    }
+
+    /// Parses the `[LEVEL]` tag of a stored line.
+    pub fn of_line(line: &str) -> Option<Level> {
+        let tag = line.split("][").nth(2)?.split(']').next()?;
+        match tag {
+            "DEBUG" => Some(Level::Debug),
+            "INFO" => Some(Level::Info),
+            "WARN" => Some(Level::Warn),
+            "ERROR" => Some(Level::Error),
+            _ => None,
+        }
+    }
+}
+
+/// `[yyyy-mm-dd][hh:mm:ss]` in UTC for a unix time.
+pub fn stamp(unix: i64) -> String {
+    let days = unix.div_euclid(86_400);
+    let secs = unix.rem_euclid(86_400);
+    // Howard Hinnant's civil-from-days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("[{y:04}-{m:02}-{d:02}][{:02}:{:02}:{:02}]", secs / 3600, (secs / 60) % 60, secs % 60)
+}
+
+/// Append-only log file with a size cap. Every line is redacted and looks
+/// like `[2026-11-21][13:26:09][INFO] message`.
 pub struct Log {
     path: PathBuf,
     max_bytes: u64,
@@ -136,16 +187,40 @@ pub struct Log {
 
 impl Log {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Log { path: path.into(), max_bytes: 256 * 1024 }
+        Log { path: path.into(), max_bytes: 2 * 1024 * 1024 }
     }
 
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }
 
-    /// Writes one line. Logging failures are ignored: the log must never
-    /// stop the app.
+    fn unix_now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Writes one line at Info. Kept for callers that pass their own clock.
     pub fn line(&self, now: i64, message: &str) {
+        self.write(now, Level::Info, message);
+    }
+
+    pub fn debug(&self, message: &str) {
+        self.write(Self::unix_now(), Level::Debug, message);
+    }
+    pub fn info(&self, message: &str) {
+        self.write(Self::unix_now(), Level::Info, message);
+    }
+    pub fn warn(&self, message: &str) {
+        self.write(Self::unix_now(), Level::Warn, message);
+    }
+    pub fn error(&self, message: &str) {
+        self.write(Self::unix_now(), Level::Error, message);
+    }
+
+    /// Logging failures are ignored: the log must never stop the app.
+    pub fn write(&self, now: i64, level: Level, message: &str) {
         if let Ok(meta) = fs::metadata(&self.path) {
             if meta.len() > self.max_bytes {
                 let _ = fs::rename(&self.path, self.path.with_extension("old.log"));
@@ -155,8 +230,22 @@ impl Log {
             let _ = fs::create_dir_all(dir);
         }
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&self.path) {
-            let _ = writeln!(f, "{now} {}", redact(message).replace(['\r', '\n'], " "));
+            let _ = writeln!(f, "{}[{}] {}", stamp(now), level.tag(), redact(message).replace(['\r', '\n'], " "));
         }
+    }
+
+    /// The last `lines` lines of the log (the current file, preceded by the
+    /// rotated one when the current file is short).
+    pub fn tail(&self, lines: usize) -> Vec<String> {
+        let mut text = fs::read_to_string(&self.path).unwrap_or_default();
+        if text.lines().count() < lines {
+            if let Ok(old) = fs::read_to_string(self.path.with_extension("old.log")) {
+                text = old + &text;
+            }
+        }
+        let all: Vec<&str> = text.lines().collect();
+        let start = all.len().saturating_sub(lines);
+        all[start..].iter().map(|s| s.to_string()).collect()
     }
 }
 
@@ -222,5 +311,19 @@ mod tests {
         let text = fs::read_to_string(log.path()).unwrap();
         assert!(!text.contains("LEAKME"));
         assert_eq!(text.lines().count(), 1);
+        assert!(text.starts_with("[1970-01-01][00:00:01][INFO] "));
+        log.warn("careful");
+        let tail = log.tail(1);
+        assert_eq!(tail.len(), 1);
+        assert!(tail[0].ends_with("[WARN] careful"));
+        assert_eq!(Level::of_line(&tail[0]), Some(Level::Warn));
+        assert_eq!(Level::of_line("garbage"), None);
+    }
+
+    #[test]
+    fn stamps_are_utc_calendar_dates() {
+        assert_eq!(stamp(0), "[1970-01-01][00:00:00]");
+        assert_eq!(stamp(951_782_400), "[2000-02-29][00:00:00]");
+        assert_eq!(stamp(1_795_229_780), "[2026-11-21][02:56:20]");
     }
 }

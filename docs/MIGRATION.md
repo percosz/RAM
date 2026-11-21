@@ -76,17 +76,18 @@ somewhere safe or delete it after use.
 
 | In Roblox Account Manager | In RAM |
 |---|---|
-| Add an account with a password or cookie | **Add → Sign in in browser**: a Roblox sign-in page opens in RAM's own browser window and the session is captured into the vault. Pasting a cookie still works. |
+| Add an account with a password or cookie | **Add → Sign in in browser**: a Roblox sign-in page opens in your default browser (its own profile for that account) and the session is captured into the vault. Pasting a cookie still works. |
 | "Valid" flag from a cookie check | Sign-in status from the same check RoALT uses: valid, signed out, *bound session required*, *verification required*, or unchanged when Roblox could not be reached. |
 | Join place / job, follow user | The same: Place ID, optional Job ID, Follow by username. A ticket launch, no browser involved. |
-| Embedded browser | **Open Browser** opens roblox.com signed in as that account, in a window with its own profile; it is cleared when closed. |
+| Embedded browser | **Open Browser** opens roblox.com in your own default browser (Brave, Chrome, Edge…) signed in as that account, with a separate browser profile per account; its cookies are wiped when the window closes. |
 | Multi Roblox option | On by default (Settings → Launching). |
 | Local web API, Nexus, Account Control, auto-execute | Removed. |
-| FPS unlock | Removed. The frame-rate cap is a Roblox setting shared by all clients. |
+| FPS unlock | Replaced by **Settings → Performance**: an FPS cap and lighter graphics for alt clients only, written to Roblox's own settings before each launch and restored after; the Main account is never touched. |
 
 ## Where RAM keeps its data
 
 `%LOCALAPPDATA%\RAM\store.json` (accounts and settings), `store.json.bak`
-(the previous save), `vault.bin` (encrypted cookies), `profiles\<id>\` (per-
-account browser profiles) and `RAM.log` (redacted). Removing an account
-removes its vault entry and browser profile.
+(the previous save), `vault.bin` (encrypted cookies), `browser-profiles\<id>\` (per-account
+browser profiles, cookies wiped on close) and `RAM.log` (dated, levelled,
+redacted). Crash history lives in `store.json`. Removing an account removes
+its vault entry.

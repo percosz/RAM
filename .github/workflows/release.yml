@@ -1,0 +1,94 @@
+# Builds and publishes a RAM release when a version tag is pushed.
+#
+#   git tag v0.3.0 && git push origin v0.3.0
+#
+# Produces, on the GitHub release for that tag:
+#   RAM_<version>_x64-setup.exe        NSIS installer (what the auto-updater installs)
+#   RAM_<version>_x64-setup.exe.sig    its update signature
+#   latest.json                        what RAM's updater reads
+#   RAM-<version>-x64-portable.zip     the bare exe for people who want no installer
+#
+# Secrets: TAURI_SIGNING_PRIVATE_KEY (the minisign private key; its public
+# half is in app/src-tauri/tauri.conf.json) and, if the key has one,
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install front-end dependencies
+        working-directory: app
+        run: npm ci --no-fund --no-audit
+
+      - name: Run the Rust tests
+        run: cargo test --workspace --locked
+
+      - name: Version from the tag
+        id: v
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$tag" != "$conf" ]; then
+            echo "tag v$tag does not match tauri.conf.json version $conf" >&2; exit 1
+          fi
+          echo "version=$conf" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          awk -v v="${{ steps.v.outputs.version }}" '/^## /{p = ($2 == v); next} p' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "- See the commit history." > notes.md; fi
+          cat notes.md
+
+      - name: Build and publish the installer, signature and latest.json
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: v${{ steps.v.outputs.version }}
+          releaseName: RAM ${{ steps.v.outputs.version }}
+          releaseBody: ""
+          releaseBodyFile: notes.md
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          args: --locked
+
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          $v = "${{ steps.v.outputs.version }}"
+          $stage = "dist\RAM-$v-x64-portable"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item target\release\RAM.exe, LICENSE, NOTICE.md, README.md, CHANGELOG.md $stage
+          Compress-Archive -Path "$stage\*" -DestinationPath "dist\RAM-$v-x64-portable.zip" -Force
+          Get-FileHash "dist\RAM-$v-x64-portable.zip" -Algorithm SHA256 | Format-List
+          gh release upload "v$v" "dist\RAM-$v-x64-portable.zip" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -100,11 +100,24 @@ pub fn import_apply(app: AppHandle, state: State<'_, Shared>, folder: String, se
         match import_cookies::read_cookies(&folder, Some(&LegacyDpapi)) {
             Ok(list) => {
                 for lc in list {
-                    let id = s.store.accounts.iter().find(|a| a.username.eq_ignore_ascii_case(&lc.username)).map(|a| a.id);
+                    // Match by username, or by the legacy user id for an
+                    // account the user has since renamed.
+                    let key = format!("legacy:user:{}", lc.user_id);
+                    let id = s
+                        .store
+                        .accounts
+                        .iter()
+                        .find(|a| a.username.eq_ignore_ascii_case(&lc.username) || (lc.user_id != 0 && a.import_key.as_deref() == Some(&key)))
+                        .map(|a| a.id);
                     if let Some(id) = id {
                         if s.vault.set_secret(id, &lc.cookie, &crate::svc::WinEntropy, now()).is_ok() {
                             cookie_count += 1;
                             to_check.push(id);
+                            if let Some(a) = s.store.account_mut(id) {
+                                if a.sign_in.detail.starts_with("Imported without credentials") {
+                                    a.sign_in.detail = "Cookie imported; checking…".into();
+                                }
+                            }
                         }
                     }
                 }
@@ -184,10 +197,15 @@ pub fn clients_snapshot(state: State<'_, Shared>) -> Result<Vec<ClientView>, Str
 
 #[tauri::command]
 pub fn close_client(state: State<'_, Shared>, pid: u32) -> Result<(), String> {
-    let s = lock(&state)?;
+    let mut s = lock(&state)?;
     let key = s.procs.list_clients().map_err(|e| e.to_string())?.into_iter().find(|p| p.key.pid == pid).map(|p| p.key);
     match key {
-        Some(k) => s.procs.request_close(k).map_err(|e| e.to_string()),
+        Some(k) => {
+            // Recorded as "Closed", not a crash, by the watcher.
+            s.diag.closing.push(pid);
+            s.log.info(&format!("asked client {pid} to close"));
+            s.procs.request_close(k).map_err(|e| e.to_string())
+        }
         None => Err("that client is no longer running".into()),
     }
 }

@@ -55,6 +55,14 @@ pub fn update_account(state: State<'_, Shared>, patch: AccountPatch) -> Result<A
         if let Some(v) = patch.favorite {
             a.favorite = v;
         }
+        if let Some(v) = patch.full_quality {
+            a.full_quality = v;
+        }
+        if patch.clear_fps_cap {
+            a.fps_cap = None;
+        } else if let Some(v) = patch.fps_cap {
+            a.fps_cap = Some(v.clamp(5, 360));
+        }
     }
     s.save();
     dto::account_view(&s, patch.id).ok_or_else(|| "account not found".into())
@@ -115,6 +123,17 @@ pub fn set_settings(state: State<'_, Shared>, settings: Settings) -> Result<Sett
     }
     s.save();
     Ok(s.store.settings.clone())
+}
+
+#[tauri::command]
+pub fn set_graphics(state: State<'_, Shared>, graphics: ram_core::client_settings::GraphicsSettings) -> Result<ram_core::client_settings::GraphicsSettings, String> {
+    ram_core::client_settings::validate_custom(&graphics.custom_flags)?;
+    let mut s = lock(&state)?;
+    let mut g = graphics;
+    g.fps_cap = ram_core::client_settings::clamp_fps(g.fps_cap);
+    s.store.graphics = g;
+    s.save();
+    Ok(s.store.graphics.clone())
 }
 
 #[tauri::command]

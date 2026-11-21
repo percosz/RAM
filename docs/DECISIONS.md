@@ -18,6 +18,57 @@ claims about Roblox, browsers and Windows is in
 Because the two revisions differ by one line in a removed feature, 3.7.2 is
 the migration target: the importer reads what 3.7.2 writes.
 
+## Update 3: your own browser, light alts, crash history, updates (v0.3)
+
+Driven by use with a real account list (27 accounts imported from the legacy
+app) and by the parts of RoALT its users rely on. Read with
+`REFERENCE_CODE_STUDY.md` section F.
+
+- **Open Browser uses the user's default browser**, not an embedded webview.
+  Brave/Chrome/Edge/Vivaldi are started with a per-account `--user-data-dir`
+  and `--remote-debugging-port=0`; RAM connects to the DevTools port the
+  browser writes into the profile, sets `.ROBLOSECURITY` for `.roblox.com`
+  with `Storage.setCookies`, opens roblox.com and closes the launcher tab. The
+  idea is niccs v4's (which downloads Chrome for Testing); RAM drives the
+  browser already installed. The embedded window of v0.2 is gone: the user
+  asked for their real browser, and fresh WebView2 profiles draw sign-in
+  challenges. The cost is a loopback DevTools port while the window is open,
+  stated in the README. Firefox as default falls back to any installed
+  Chromium browser. The profile's cookie database is deleted when the
+  browser exits and swept at start, so the vault stays the only persistent
+  store.
+- **Performance follows RoALT's two files.** Roblox refuses frame-rate
+  FastFlags in `ClientAppSettings.json`, so the FPS cap and the quality level
+  go into `GlobalBasicSettings_13.xml` (`FramerateCap`, `GraphicsQualityLevel`,
+  `SavedQualityLevel`); rendering goes into FastFlags. Both are written right
+  before a launch, under one lock, and restored after the client's log shows
+  `LoadClientSettingsFromLocal` / `Replicator created` (plus 1 s), or after
+  60 s. The user's values and ours are recorded in `store.json` so a crash
+  mid-launch is undone at the next start. Where RoALT skips FastFlags under a
+  bootstrapper, RAM writes them into the bootstrapper's own
+  `Modifications\ClientSettings\ClientAppSettings.json` (Froststrap, Bloxstrap,
+  Fishstrap, Voidstrap), which the bootstrapper copies to the client at every
+  launch, so flags work through Froststrap too. **Main is exempt from
+  everything**, including the FPS cap (RoALT exempts Full-quality accounts
+  from quality only); any other account can be marked Full quality or given
+  its own cap. Window tiling, minimize, mute and CPU limits were left out.
+- **Crash history from the client's log.** A watcher binds each
+  `RobloxPlayerBeta.exe` to the `_Player_` log whose file-name time is within
+  six seconds of the process start, preferring a log whose head names the
+  browser tracker id of a launch RAM made; the `userid` in the join line
+  links clients RAM did not launch. Endings are classified from RoALT's
+  marker list (disconnect lines, reason codes 285/273, teleports, shutdown)
+  plus a new crash dump under `logs\crashes`; user closes are not recorded.
+- **Updates through `tauri-plugin-updater`** reading `latest.json` from the
+  GitHub release, signed with a minisign key whose public half is in the
+  config. The offer is a sidebar pill, never a modal; install happens on
+  click; What's new comes from the embedded CHANGELOG. Portable copies are
+  pointed at the release page. RoALT's custom ECDSA updater was read, but the
+  Tauri plugin does the same job with less code to trust.
+- **Rows show the username**; alias and description are the second line.
+  Tick boxes replace the Shift/Ctrl-only selection. The Classic layout was
+  removed rather than kept in step with every change.
+
 ## Update 2: Tauri shell, simpler launching, browser sessions (v0.2)
 
 The native Win32 shell (`crates/ram-app`, kept for reference, no longer built)

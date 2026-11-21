@@ -2,8 +2,10 @@
 
 mod cmd_accounts;
 mod cmd_browser;
+mod cmd_diag;
 mod cmd_io;
 mod cmd_launch;
+mod cmd_update;
 mod cmd_vault;
 mod dto;
 mod state;
@@ -18,7 +20,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage::<Shared>(Mutex::new(AppState::init()))
+        .manage(cmd_update::UpdateSlot::default())
         .invoke_handler(tauri::generate_handler![
             cmd_accounts::app_version,
             cmd_accounts::start_hint,
@@ -29,6 +33,7 @@ pub fn run() {
             cmd_accounts::set_main,
             cmd_accounts::reorder_accounts,
             cmd_accounts::set_settings,
+            cmd_accounts::set_graphics,
             cmd_accounts::open_data_folder,
             cmd_vault::vault_status,
             cmd_vault::vault_setup_dpapi,
@@ -44,6 +49,8 @@ pub fn run() {
             cmd_vault::cookie_remove,
             cmd_vault::cookie_reveal,
             cmd_launch::check_accounts,
+            cmd_launch::refresh_avatars,
+            cmd_launch::place_info,
             cmd_launch::launch,
             cmd_launch::follow,
             cmd_browser::open_browser,
@@ -54,19 +61,31 @@ pub fn run() {
             cmd_io::export_accounts,
             cmd_io::clients_snapshot,
             cmd_io::close_client,
+            cmd_diag::crashes_list,
+            cmd_diag::crashes_clear,
+            cmd_diag::crash_open_log,
+            cmd_diag::crashes_export,
+            cmd_diag::log_tail,
+            cmd_diag::open_log_folder,
+            cmd_diag::diagnostics_text,
+            cmd_update::update_check,
+            cmd_update::update_install,
+            cmd_update::install_kind,
+            cmd_update::release_notes,
+            cmd_update::mark_seen_version,
+            cmd_update::open_url,
         ])
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if cmd_browser::is_browser_label(window.label()) {
-                    cmd_browser::on_browser_closing(window.app_handle(), window.label());
-                }
-            }
+        .setup(|app| {
+            cmd_diag::spawn_watcher(app.handle().clone());
+            Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building RAM")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Ok(mut s) = app.state::<Shared>().lock() {
+                    s.restore_client_settings();
+                    s.log.info("RAM exiting");
                     s.save();
                 }
             }

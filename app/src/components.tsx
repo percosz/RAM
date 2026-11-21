@@ -1,6 +1,6 @@
 // Small shared components: buttons, fields, toggles, badges, avatars, modals, toasts.
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import type { Account, SignInState } from "./api";
 import { signInLabel } from "./api";
@@ -57,11 +57,16 @@ export function initials(name: string): string {
   return s || "?";
 }
 
+/** Initials over a colour, with the Roblox headshot on top once it loads (RoALT's pattern). */
 export function Avatar({ name, seed, lg, src }: { name: string; seed: number; lg?: boolean; src?: string | null }) {
   const bg = COLORS[seed % COLORS.length];
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const [broken, setBroken] = useState<string | null>(null);
+  const show = !!src && src !== broken;
   return (
     <span className={`avatar ${lg ? "lg" : ""}`} style={{ background: bg }} aria-hidden>
-      {src ? <img src={src} alt="" /> : initials(name)}
+      {initials(name)}
+      {show && <img key={src} src={src!} alt="" loading="lazy" decoding="async" className={loaded === src ? "ok" : ""} onLoad={() => setLoaded(src!)} onError={() => setBroken(src!)} />}
     </span>
   );
 }

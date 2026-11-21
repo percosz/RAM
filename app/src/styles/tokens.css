@@ -7,8 +7,9 @@
   --radius: 10px;
   --radius-sm: 7px;
   --radius-xs: 5px;
-  --row-h: 40px;
-  --density: 1;
+  --row-h: 46px;
+  --avatar: 30px;
+  --name-size: 13.5px;
   /* default: Catppuccin Mocha */
   --bg: #1e1e2e; --surface: #24243a; --surface-2: #313244; --text: #cdd6f4; --muted: #a6adc8;
   --border: #45475a; --accent: #cba6f7; --accent-text: #1e1e2e;
@@ -26,7 +27,10 @@
 :root[data-theme="rosepine"] { --bg: #191724; --surface: #1f1d2e; --surface-2: #26233a; --text: #e0def4; --muted: #908caa; --border: #403d52; --accent: #eb6f92; --accent-text: #191724; --good: #9ccfd8; --warn: #f6c177; --bad: #eb6f92; --scheme: dark; }
 :root[data-theme="lineage"] { --bg: #1b1d1a; --surface: #232621; --surface-2: #2c3029; --text: #dcd6c4; --muted: #9a9684; --border: #3a3d34; --accent: #8fa37a; --accent-text: #14160f; --good: #8fbf7a; --warn: #d0a45c; --bad: #d98a7a; --scheme: dark; }
 
-:root[data-density="compact"] { --row-h: 32px; --radius: 8px; --radius-sm: 6px; }
+/* Row sizes (Settings → Appearance → Rows). Compact shows one line per account. */
+:root[data-density="compact"] { --row-h: 30px; --avatar: 20px; --name-size: 13px; }
+:root[data-density="comfortable"] { --row-h: 56px; --avatar: 38px; --name-size: 14px; }
+:root[data-density="large"] { --row-h: 70px; --avatar: 50px; --name-size: 15.5px; }
 
 /* Derived */
 :root {

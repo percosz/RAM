@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { open as pickDialog } from "@tauri-apps/plugin-dialog";
-import { api, type ThemeKind } from "../api";
+import { api, type GraphicsSettings, type Msaa, type RenderMode, type Texture, type ThemeKind } from "../api";
 import { Btn, Field, Toggle } from "../components";
 import { useApp } from "../store";
 import { ChangePasswordDialog, ConfirmDialog, ImportDialog, VaultSetupDialog } from "../dialogs";
@@ -21,19 +21,65 @@ const THEMES: Array<{ id: ThemeKind; name: string; bg: string; fg: string }> = [
 ];
 const ACCENTS = [0xcba6f7, 0x89b4fa, 0x94e2d5, 0xa6e3a1, 0xf9e2af, 0xfab387, 0xf38ba8, 0xeb6f92, 0xf5c2e7, 0x5b9be0];
 
-export function SettingsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
-  const { snap, settings, saveSettings, refresh, toast } = useApp();
+function Seg<T extends string>({ value, options, onChange, sm }: { value: T; options: Array<[T, string]>; onChange: (v: T) => void; sm?: boolean }) {
+  return (
+    <div className={`seg ${sm ? "sm" : ""}`}>
+      {options.map(([v, label]) => <button key={v} type="button" className={value === v ? "active" : ""} onClick={() => onChange(v)}>{label}</button>)}
+    </div>
+  );
+}
+
+function PerfRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="perf-row">
+      <div className="lbl">{label}</div>
+      {hint && <div className="hint">{hint}</div>}
+      <div className="ctl">{children}</div>
+    </div>
+  );
+}
+
+function Switch({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return <label className="toggle"><input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} /><span className="track" /></label>;
+}
+
+/** Max alts / Balanced / Roblox defaults, modelled on RoALT's presets. */
+const PRESETS: Record<string, Partial<GraphicsSettings>> = {
+  max: { enabled: true, fps_cap: 10, low_graphics: true, lighter_rendering: true, render: { msaa: "X1", texture: "Lowest", mode: "Default", gray_sky: true, no_grass: true, lowest_frm: true, pause_voxelizer: true } },
+  balanced: { enabled: true, fps_cap: 30, low_graphics: true, lighter_rendering: true, render: { msaa: "X1", texture: "Lowest", mode: "Default", gray_sky: false, no_grass: true, lowest_frm: true, pause_voxelizer: false } },
+  defaults: { enabled: false, fps_cap: 0, low_graphics: false, lighter_rendering: false },
+};
+
+export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () => void; onShowUpdate: () => void }) {
+  const { snap, settings, saveSettings, saveGraphics, refresh, toast, update, checkForUpdate } = useApp();
   const [dlg, setDlg] = useState<null | "setup" | "change" | "removeVault" | "import">(null);
   const [exportCookies, setExportCookies] = useState(false);
+  const [checkMsg, setCheckMsg] = useState("");
+  const [flagsText, setFlagsText] = useState<string | null>(null);
+  const [flagsErr, setFlagsErr] = useState("");
   if (!snap || !settings) return null;
   const v = snap.vault;
+  const g = snap.graphics;
   const hex = settings.accent != null ? "#" + (settings.accent & 0xffffff).toString(16).padStart(6, "0") : "";
+  const mainName = snap.accounts.find((a) => a.is_main)?.username;
 
   const exportNow = async () => {
     if (exportCookies && !v.unlocked) { onNeedUnlock(); return; }
     const dir = await pickDialog({ directory: true, title: "Choose where to write AccountData.json" });
     if (!dir || Array.isArray(dir)) return;
     try { toast(await api.exportAccounts(dir, exportCookies), "good"); } catch (e) { toast(String(e), "bad"); }
+  };
+  const render = (patch: Partial<GraphicsSettings["render"]>) => saveGraphics({ render: { ...g.render, ...patch } });
+  const saveFlags = async () => {
+    if (flagsText === null) return;
+    try {
+      const parsed = flagsText.trim() ? JSON.parse(flagsText) : {};
+      if (typeof parsed !== "object" || Array.isArray(parsed) || parsed === null) throw new Error("Must be a JSON object of \"Flag\": \"value\" pairs.");
+      const flags: Record<string, string> = {};
+      for (const [k, val] of Object.entries(parsed)) flags[k] = typeof val === "string" ? val : JSON.stringify(val);
+      await saveGraphics({ custom_flags: flags });
+      setFlagsText(null); setFlagsErr("");
+    } catch (e) { setFlagsErr(String((e as Error).message ?? e)); }
   };
 
   return (
@@ -57,19 +103,15 @@ export function SettingsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
             </div>
           </Field>
           <div className="kv">
-            <span>Layout</span>
-            <div className="seg">
-              <button type="button" className={settings.layout === "Modern" ? "active" : ""} onClick={() => saveSettings({ layout: "Modern" })}>Modern</button>
-              <button type="button" className={settings.layout === "Classic" ? "active" : ""} onClick={() => saveSettings({ layout: "Classic" })}>Classic</button>
-            </div>
+            <span>Rows</span>
+            <Seg value={settings.density} options={[["Compact", "Compact"], ["Normal", "Normal"], ["Comfortable", "Comfortable"], ["Large", "Large"]]} onChange={(d) => saveSettings({ density: d })} />
             <span />
-            <div className="hint">Modern: sidebar and a details pane. Classic: one list with a top bar, like alyae's manager.</div>
+            <div className="hint">Compact shows one line per account; the others show the alias and description underneath.</div>
           </div>
           <div className="kv">
             <span>Corners</span>
             <input type="range" min={0} max={16} value={settings.corner_radius} onChange={(e) => saveSettings({ corner_radius: Number(e.target.value) })} />
           </div>
-          <Toggle checked={settings.compact} onChange={(c) => saveSettings({ compact: c })} label="Compact rows" />
         </div>
       </section>
 
@@ -77,12 +119,71 @@ export function SettingsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
         <div className="card-h">Launching</div>
         <div className="card-b">
           <Toggle checked={settings.multi_instance} onChange={(c) => saveSettings({ multi_instance: c })} label="Run several Roblox clients at once"
-            hint={`Holds Roblox's single-instance lock so more than one client can run; never modifies the client. ${snap.multi_instance_held ? "Active." : settings.multi_instance ? "Another program already holds the lock." : ""}`} />
+            hint={`Holds Roblox's single-instance lock so more than one client can run; never modifies the client. ${snap.multi_instance_held ? "Active." : settings.multi_instance ? "Another program already holds the lock (close Roblox or the other manager)." : ""}`} />
           <div className="kv">
             <span>Seconds between launches</span>
             <input className="input" type="number" min={0} max={120} value={settings.launch_spacing_secs} onChange={(e) => saveSettings({ launch_spacing_secs: Math.max(0, Math.min(120, Number(e.target.value) || 0)) })} />
           </div>
           <Toggle checked={settings.include_main_in_batch} onChange={(c) => saveSettings({ include_main_in_batch: c })} label="Include Main in Select All" />
+          <div className="hint">Launches go through <b>{snap.launcher_name}</b>, the program registered for roblox-player links. Open Browser uses <b>{snap.browser_name || "no usable browser"}</b>{snap.browser_name ? " with a separate profile per account" : " (install Brave, Chrome or Edge)"}.</div>
+        </div>
+      </section>
+
+      <section className="card wide">
+        <div className="card-h">Performance — alt clients</div>
+        <div className="card-b">
+          <div className="hint">
+            Lower each alt client's FPS and graphics the way RoALT does. The FPS cap and quality go into Roblox's own settings file; rendering flags go into the FastFlag file {snap.launcher_name === "Roblox" ? "next to the client" : `${snap.launcher_name} applies at launch`}. Both are written just before a client starts and put back as soon as it has read them, so your own Roblox keeps its settings.
+            {mainName ? <> <b>{mainName}</b> is Main and is never touched.</> : <> Mark your own account as <b>Main</b> so it is never touched.</>}
+          </div>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            <Btn sm onClick={() => saveGraphics(PRESETS.max!)}>Max alts (10 FPS, lowest)</Btn>
+            <Btn sm onClick={() => saveGraphics(PRESETS.balanced!)}>Balanced (30 FPS)</Btn>
+            <Btn sm onClick={() => saveGraphics(PRESETS.defaults!)}>Roblox defaults (off)</Btn>
+          </div>
+          <div>
+            <PerfRow label="Apply performance settings to alt clients" hint="Off: nothing is written anywhere.">
+              <Switch checked={g.enabled} onChange={(c) => saveGraphics({ enabled: c })} />
+            </PerfRow>
+            <PerfRow label="FPS cap" hint="Frames per second each alt client draws (5–360). 0 leaves the user's own cap. Override it per account in its details; Main is exempt.">
+              <input className="input" type="number" min={0} max={360} value={g.fps_cap} onChange={(e) => saveGraphics({ fps_cap: Math.max(0, Math.min(360, Number(e.target.value) || 0)) })} /><span className="muted">FPS</span>
+            </PerfRow>
+            <PerfRow label="Lowest graphics" hint="Graphics quality level 1 for alts. Saves most of the GPU and CPU.">
+              <Switch checked={g.low_graphics} onChange={(c) => saveGraphics({ low_graphics: c })} />
+            </PerfRow>
+            <PerfRow label="Lighter rendering" hint="FastFlags that cut detail further. Uses much less GPU memory.">
+              <Switch checked={g.lighter_rendering} onChange={(c) => saveGraphics({ lighter_rendering: c })} />
+            </PerfRow>
+            {g.lighter_rendering && (
+              <div className="perf-sub">
+                <PerfRow label="Anti-aliasing (MSAA)" hint="Lower is faster, edges look jagged.">
+                  <Seg sm value={g.render.msaa} options={[["Default", "Default"], ["X1", "x1"], ["X2", "x2"], ["X4", "x4"]] as Array<[Msaa, string]>} onChange={(msaa) => render({ msaa })} />
+                </PerfRow>
+                <PerfRow label="Texture quality" hint="Lowest uses the least GPU memory.">
+                  <Seg sm value={g.render.texture} options={[["Default", "Default"], ["Lowest", "Lowest"], ["Low", "Low"], ["Medium", "Medium"], ["High", "High"]] as Array<[Texture, string]>} onChange={(texture) => render({ texture })} />
+                </PerfRow>
+                <PerfRow label="Rendering mode" hint="Change only for artifacts or crashes. Roblox may ignore Vulkan and OpenGL.">
+                  <Seg sm value={g.render.mode} options={[["Default", "Roblox default"], ["D3D11", "Direct3D 11"], ["Vulkan", "Vulkan"], ["OpenGl", "OpenGL"]] as Array<[RenderMode, string]>} onChange={(mode) => render({ mode })} />
+                </PerfRow>
+                <PerfRow label="Gray sky" hint="Replaces the skybox with flat gray."><Switch checked={g.render.gray_sky} onChange={(gray_sky) => render({ gray_sky })} /></PerfRow>
+                <PerfRow label="No grass" hint="Removes rendered grass."><Switch checked={g.render.no_grass} onChange={(no_grass) => render({ no_grass })} /></PerfRow>
+                <PerfRow label="Lowest render quality" hint="Forces Roblox's lowest internal quality level."><Switch checked={g.render.lowest_frm} onChange={(lowest_frm) => render({ lowest_frm })} /></PerfRow>
+                <PerfRow label="Pause lighting updates" hint="Stops voxel lighting updates; lighting can look wrong."><Switch checked={g.render.pause_voxelizer} onChange={(pause_voxelizer) => render({ pause_voxelizer })} /></PerfRow>
+              </div>
+            )}
+            <PerfRow label="Custom FastFlags" hint="Your own flags, written for every alt client after the ones above (so they win). Applied even for Full quality accounts.">
+              {flagsText === null
+                ? <Btn sm onClick={() => setFlagsText(JSON.stringify(g.custom_flags, null, 2))}>Edit… ({Object.keys(g.custom_flags).length})</Btn>
+                : <Btn sm kind="primary" onClick={saveFlags}>Save</Btn>}
+            </PerfRow>
+            {flagsText !== null && (
+              <div>
+                <textarea className="textarea mono" rows={8} style={{ width: "100%" }} value={flagsText} onChange={(e) => setFlagsText(e.target.value)} placeholder={'{\n  "DFIntTaskSchedulerTargetFps": "60"\n}'} />
+                {flagsErr && <div className="bad">{flagsErr}</div>}
+                <div className="row" style={{ marginTop: 6 }}><Btn sm kind="ghost" onClick={() => { setFlagsText(null); setFlagsErr(""); }}>Cancel</Btn></div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
@@ -126,10 +227,13 @@ export function SettingsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
       </section>
 
       <section className="card">
-        <div className="card-h">About</div>
+        <div className="card-h">Updates and about</div>
         <div className="card-b">
-          <div>RAM {snap.version} — a rewrite of <b>Roblox Account Manager</b> by ic3w0lf22, GPL‑3.0.</div>
-          <div className="hint">Cookie check modelled on RoALT (MIT); embedded browser model from alyae (GPL‑3.0); layout cues from niccs' RAM v4 (GPL‑3.0). Not affiliated with Roblox Corporation. See NOTICE.md.</div>
+          <div>RAM {snap.version}{update && update.state !== "dismissed" ? <> — <a href="#" onClick={(e) => { e.preventDefault(); onShowUpdate(); }}>{update.version} is available</a></> : null}</div>
+          <Toggle checked={settings.check_updates} onChange={(c) => saveSettings({ check_updates: c })} label="Check for RAM updates" hint="Asks GitHub Releases after start and every 6 hours. A new version is offered in the sidebar, never installed without your click; its installer must carry RAM's release signature." />
+          <div className="row"><Btn sm onClick={async () => { setCheckMsg("Checking…"); setCheckMsg(await checkForUpdate(true)); }}>Check now</Btn><span className="hint">{checkMsg}</span></div>
+          <div className="row"><Btn sm kind="ghost" onClick={() => api.openUrl(`https://github.com/${snap.github_repo}/releases`).catch(() => {})}>Release notes on GitHub</Btn></div>
+          <div className="hint">A rewrite of <b>Roblox Account Manager</b> by ic3w0lf22 (GPL‑3.0). Cookie check and performance model from RoALT (MIT); embedded-browser ideas from alyae (GPL‑3.0); layout cues from niccs' RAM v4 (GPL‑3.0). Not affiliated with Roblox Corporation. See NOTICE.md.</div>
         </div>
       </section>
 

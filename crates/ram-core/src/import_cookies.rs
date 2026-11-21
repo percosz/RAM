@@ -12,13 +12,17 @@ use zeroize::Zeroizing;
 struct Row {
     #[serde(rename = "Username", default)]
     username: String,
+    #[serde(rename = "UserID", default)]
+    user_id: u64,
     #[serde(rename = "SecurityToken", default)]
     security_token: String,
 }
 
-/// One legacy account's cookie, keyed by its username.
+/// One legacy account's cookie, keyed by its username (and user id when
+/// the file has one).
 pub struct LegacyCookie {
     pub username: String,
+    pub user_id: u64,
     pub cookie: Zeroizing<String>,
 }
 
@@ -81,7 +85,7 @@ pub fn read_cookies(folder: &Path, decryptor: Option<&dyn LegacyDecryptor>) -> R
     Ok(rows
         .into_iter()
         .filter(|r| !r.username.is_empty() && !r.security_token.is_empty())
-        .map(|r| LegacyCookie { username: r.username, cookie: Zeroizing::new(r.security_token) })
+        .map(|r| LegacyCookie { username: r.username, user_id: r.user_id, cookie: Zeroizing::new(r.security_token) })
         .collect())
 }
 
@@ -95,12 +99,13 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(
             dir.join("AccountData.json"),
-            r#"[{"Username":"a","SecurityToken":"_|WARNING:-X|_AAA"},{"Username":"b","SecurityToken":""},{"Username":"","SecurityToken":"zzz"}]"#,
+            r#"[{"Username":"a","UserID":77,"SecurityToken":"_|WARNING:-X|_AAA"},{"Username":"b","SecurityToken":""},{"Username":"","SecurityToken":"zzz"}]"#,
         )
         .unwrap();
         let got = read_cookies(&dir, None).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].username, "a");
+        assert_eq!(got[0].user_id, 77);
         assert_eq!(got[0].cookie.as_str(), "_|WARNING:-X|_AAA");
         let _ = std::fs::remove_dir_all(&dir);
     }

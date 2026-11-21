@@ -1219,6 +1219,7 @@ pub fn apply(store: &mut Store, plan: &ImportPlan, now: i64) -> ImportRecord {
                         name: game.name.clone(),
                         pinned: false,
                         builtin: false,
+                        ..Default::default()
                     });
                 }
             }
@@ -2119,7 +2120,7 @@ mod tests {
 
         // An existing game is never renamed.
         let mut store = Store::default();
-        store.games.push(Game { place_id: 9, universe_id: None, name: "My name".into(), pinned: true, builtin: false });
+        store.games.push(Game { place_id: 9, universe_id: None, name: "My name".into(), pinned: true, builtin: false, ..Default::default() });
         let before = store.games.clone();
         let plan = plan(&store, &scan);
         assert_eq!(find(&plan, PlanKind::Game, "Nine").action, PlanAction::Unchanged);

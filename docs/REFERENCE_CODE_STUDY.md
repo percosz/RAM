@@ -784,3 +784,90 @@ explicit reveal) is closest to RoALT's model and strictly stronger than niccs' a
   not find a Tauri plugin for cookies in either project, and did not verify whether newer Tauri
   versions have fixed the leading-dot behaviour.
 - alyae's egui UI has no component "files" to reuse; only the module.toml declarations describe the UX.
+
+
+---
+
+## F. Second study (2026-11-21): performance, crash history, updater, system browser
+
+Done for v0.3, read-only as before. Line numbers refer to the clones as of that date.
+
+### F1. RoALT performance (`src-tauri/src/launcher/{flags,client_settings,mod,client}.rs`, `performance.rs`)
+
+Two mechanisms, both applied right before `client::start` and undone after the client has read them:
+
+1. **XML, not FastFlags, for the frame-rate cap and quality.** `client_settings.rs:1-6` records that
+   Roblox's allowlist refuses every frame-rate flag in `ClientAppSettings.json` ("Denied local
+   configuration for: DFIntTaskSchedulerTargetFps"). The three keys edited textually in
+   `%LOCALAPPDATA%\Roblox\GlobalBasicSettings_13.xml` (`client_settings.rs:31-35`):
+   `<int name="FramerateCap">` (5..=360), `<int name="GraphicsQualityLevel">` (1 for lowest) and
+   `<token name="SavedQualityLevel">` (1 for lowest, 0 auto). A missing element is inserted before
+   `</Properties>`; a file not ending in `</roblox>` is treated as half-written and left alone.
+2. **FastFlags** in `<folder of the launched exe>\ClientSettings\ClientAppSettings.json`
+   (`flags.rs:187-188`), merged over the user's file, backed up beside it as
+   `ClientAppSettings.json.roalt-before` (byte `1` + original, or `0` = no file), written atomically.
+   Table (`flags_of`, `flags.rs:31-73`): lighter rendering always sets the four
+   `DFIntCSGLevelOfDetailSwitchingDistance*` flags to `"0"`; MSAA `FIntDebugForceMSAASamples`
+   1/2/4; texture `DFFlagTextureQualityOverrideEnabled` + `DFIntTextureQualityOverride` 0..3; render
+   mode one of `FFlagDebugGraphicsPreferD3D11|Vulkan|OpenGL`; `FFlagDebugSkyGray`;
+   `FIntFRMMinGrassDistance` + `FIntFRMMaxGrassDistance` 0; `DFIntDebugFRMQualityLevelOverride` 1;
+   `DFFlagDebugPauseVoxelizer`; custom flags last. All values are JSON strings.
+
+Sequencing (`launcher/mod.rs:148-259`): one global `tokio::sync::Mutex` held from before the ticket
+until the client has read the files; detection by the client's log (found by the launch's
+`browsertrackerid` in its head) showing `SceneManager: resizing main targets` or
+`[FLog::Network] Replicator created`, then 1 s, then restore; timeouts 60 s for a log, 15 s for the
+mark. A 100 ms guard rewrites the XML if another client's exit overwrote it meanwhile, and a 1 s
+watcher after restore undoes values a closing client saved back (the user's values and the values
+RoALT wrote are kept in the DB, `settle_values`, `client_settings.rs:144-162`). Under a
+bootstrapper (Bloxstrap/Fishstrap/Froststrap/Voidstrap registered for `roblox-player:`) RoALT
+launches the bootstrapper with its registered pre-`%1` argument and the URI, keeps the XML step
+and **skips FastFlags** ("a bootstrapper manages Roblox's flags", `launcher/mod.rs:195-198`).
+`AccountSummary.full_quality` disables low graphics and lighter rendering (not the FPS cap, not
+custom flags) and also exempts the client from tiny/minimize/mute/CPU limits. Presets
+(`src/features/performance/presets.ts`): Max alts 10 FPS + gray sky + paused voxelizer,
+Balanced 30 FPS, Roblox defaults off. What RAM does differently: writes FastFlags into the
+bootstrapper's `Modifications\ClientSettings\ClientAppSettings.json` instead of skipping them,
+and exempts Main from everything.
+
+### F2. RoALT crash history (`src-tauri/src/instances/{logwatch,tracker}.rs`, `autopsy.rs`)
+
+Logs: `%LOCALAPPDATA%\Roblox\logs\<version>_<yyyymmddThhmmssZ>_Player_<5hex>_last.log`; crash
+handler logs carry `_CrashHandler_`; no PID in the name. A launched client's log is the newest
+one created since the launch whose first 256 KB names the launch's tracker id (`websiteBTId is
+<n>` / `BTID is overriden to <n>`, `logwatch.rs:82-108`); other clients are matched by file
+creation time within 3 s of process start. Markers (`logwatch.rs:49-66`): `! Joining game
+'<guid>' place <n> at`, `UgcExperienceController: doTeleport`, six disconnect strings
+(`Disconnection Notification`, `Lost connection with reason`, `Time to disconnect replication
+data`, `Sending disconnect with reason`, `Disconnected from server for reason`, `Connection closed
+by server`), `encountered during authentication` / `Error Code: 403`, `Replicator created` /
+`serverId:` for in-game, `userid:` on the `GameJoinLoadTime` line, `challengedByGcs`. Player-
+initiated = `DisconnectClientInitiated`, `Same account launched`, `DuplicateLogin`, or reason codes
+285/273 (`client_initiated`, `logwatch.rs:71-75`). Lines on `FLog::Output/Warning/Error` are ignored
+except the join line (game scripts print anything). Kinds: `crash | disconnect | hang | mem |
+timed`; a user close is not recorded; 200 rows kept; CSV with BOM and formula defusing
+(`commands.rs:3368-3389`). RAM reuses the marker list and the CSV rules, adds a shutdown marker and
+a crash-dump check, and records Replaced and Sign-in refused as their own kinds.
+
+### F3. RoALT self-update (`src-tauri/src/self_update.rs`) and the browsers
+
+RoALT: custom updater against `api.github.com/repos/.../releases/latest`, assets
+`RoALT-Setup-<v>.exe` + `.exe.sig` (ECDSA P-256 over `"<name>\n" + bytes`, verified with CNG
+against an embedded public key), temp file write-locked while verified, Inno installer run with
+`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RELAUNCH`, check at start and every
+6 h behind a setting, offered in the title-bar "island", never a modal; release notes shown as a
+News card from the GitHub release body generated from `CHANGELOG.md`. RAM uses
+`tauri-plugin-updater` (minisign-signed `latest.json`) for the same flow.
+
+Browsers: alyae's "Open in browser" is a wry/WebView2 window on a throw-away temp profile with the
+cookie set through wry (`alyae-roblox-login/src/main.rs:234-273`); its `browser.rs` only reads the
+default browser's family from `UrlAssociations` for user-agent spoofing. RoALT's Browse is a Tauri
+child webview on a kept profile with the cookie injected through the WebView2 COM cookie manager.
+Neither drives the system browser; niccs v4 does (section B2), which is the model RAM v0.3 follows
+with the installed browser instead of a downloaded Chrome.
+
+Headshots (RoALT `roblox_api/mod.rs:118-146`): `thumbnails.roblox.com/v1/users/avatar-headshot?
+userIds=<csv ≤100>&size=150x150&format=Png&isCircular=false`, keep only `Completed` entries with
+an `https://*.rbxcdn.com` URL, retry `Pending` ids, cache the URL for hours, initials until the
+image loads. Place names (both RoALT and alyae): `apis.roblox.com/universes/v1/places/{id}/universe`
+then `games.roblox.com/v1/games?universeIds=`.

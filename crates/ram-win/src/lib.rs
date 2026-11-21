@@ -14,11 +14,13 @@ pub mod hello;
 pub mod http;
 pub mod job;
 pub mod launch;
+pub mod launcher_info;
 pub mod multi_instance;
 pub mod notify;
 pub mod paths;
 pub mod process;
 pub mod secrets;
+pub mod sysbrowser;
 pub mod window;
 
 mod util;

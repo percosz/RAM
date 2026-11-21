@@ -52,9 +52,11 @@
 .badge.accent { background: var(--accent-wash); color: var(--accent); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
 
-.avatar { width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center; font-weight: 700; font-size: 11px; color: #fff; flex: none; overflow: hidden; }
+.avatar { position: relative; width: 28px; height: 28px; border-radius: 26%; display: inline-grid; place-items: center; font-weight: 700; font-size: 11px; color: #fff; flex: none; overflow: hidden; }
 .avatar.lg { width: 56px; height: 56px; border-radius: 14px; font-size: 20px; }
-.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* The headshot fades in over the initials once it has loaded. */
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity .15s; background: var(--surface-2); }
+.avatar img.ok { opacity: 1; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .card-h { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }

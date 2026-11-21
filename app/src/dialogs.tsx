@@ -207,9 +207,12 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     } catch (e) { setErr(errText(e)); await refresh(); } finally { setBusy(false); }
   };
   const vaultOk = !!snap?.vault.unlocked;
+  // Cookies can be (re)imported for accounts that are already present, so
+  // the button stays live when nothing is selected but cookies are wanted.
+  const cookiesOnly = !!plan && sel.size === 0 && withCookies && vaultOk && plan.cookies_available > 0;
   return (
     <Modal title="Import from Roblox Account Manager" wide onClose={onClose}
-      footer={<><Btn onClick={onClose}>Cancel</Btn>{plan && <Btn kind="primary" onClick={apply} disabled={busy || sel.size === 0}>Import {sel.size}</Btn>}</>}>
+      footer={<><Btn onClick={onClose}>Cancel</Btn>{plan && <Btn kind="primary" onClick={apply} disabled={busy || (sel.size === 0 && !cookiesOnly)}>{cookiesOnly ? "Import cookies" : `Import ${sel.size}`}</Btn>}</>}>
       {!plan ? (
         <>
           <p className="muted" style={{ margin: 0 }}>Pick the folder that contains <span className="mono">AccountData.json</span>. The folder is only read; nothing in it is changed. You'll see a preview before anything is imported.</p>
@@ -223,7 +226,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             <span>{plan.cookies_available} cookie{plan.cookies_available === 1 ? "" : "s"} in file</span>
           </div>
           {plan.cookies_available > 0 && (
-            <Toggle checked={withCookies && vaultOk} onChange={setWithCookies} label="Also move the cookies into the vault" hint={vaultOk ? "Imported accounts will be checked right away." : "Unlock (or set up) the vault first to import cookies."} />
+            <Toggle checked={withCookies && vaultOk} onChange={setWithCookies} label="Also move the cookies into the vault" hint={vaultOk ? "Accounts already in RAM get their cookie too, and every account with a cookie is checked right away." : "Unlock (or set up) the vault first to import cookies."} />
           )}
           <div style={{ maxHeight: 340, overflow: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
             <table className="table">

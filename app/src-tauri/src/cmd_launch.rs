@@ -5,6 +5,7 @@
 
 use crate::dto::LaunchEvent;
 use crate::state::{now, Shared};
+use ram_core::client_settings;
 use ram_core::model::{AccountId, RecentLaunch, Target};
 use ram_core::roblox::{self, LaunchError, LaunchTarget};
 use ram_core::roblox_profile;
@@ -84,6 +85,10 @@ pub fn start_check(app: AppHandle, id: AccountId) {
                 }
             }
         }
+        match &result {
+            Ok(w) => s.log.info(&format!("check {id}: valid (user {})", w.user.id)),
+            Err(e) => s.log.warn(&format!("check {id}: {e:?}")),
+        }
         if let Some(a) = s.store.account_mut(id) {
             match result.map(|w| w.user) {
                 Ok(user) => {
@@ -126,6 +131,121 @@ pub fn check_accounts(app: AppHandle, ids: Vec<AccountId>) -> Result<(), String>
         start_check(app.clone(), id);
     }
     Ok(())
+}
+
+/// Seconds a headshot URL is kept before it is looked up again.
+const AVATAR_TTL_SECS: i64 = 24 * 3600;
+
+/// Fetches headshots for every account with a known user id whose image is
+/// missing or older than a day (`force` refreshes all). Public API, no
+/// cookie; runs on a worker thread and announces each updated account.
+#[tauri::command]
+pub fn refresh_avatars(app: AppHandle, force: bool) -> Result<(), String> {
+    let wanted: Vec<(AccountId, u64)> = {
+        let st = app.state::<Shared>();
+        let s = st.lock().map_err(|_| "application state is unavailable".to_string())?;
+        let t = now();
+        s.store
+            .accounts
+            .iter()
+            .filter_map(|a| {
+                let uid = a.roblox_user_id?;
+                let stale = a.avatar_url.is_none() || a.avatar_at.map(|at| t - at > AVATAR_TTL_SECS).unwrap_or(true);
+                (force || stale).then_some((a.id, uid))
+            })
+            .collect()
+    };
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    std::thread::spawn(move || {
+        let http = WinHttp::new();
+        let ids: Vec<u64> = wanted.iter().map(|(_, u)| *u).collect();
+        let got = roblox_profile::headshots(&http, &ids);
+        let st = app.state::<Shared>();
+        let Ok(mut s) = st.lock() else { return };
+        let t = now();
+        let mut changed = Vec::new();
+        for (uid, url) in got {
+            for (id, u) in &wanted {
+                if *u == uid {
+                    if let Some(a) = s.store.account_mut(*id) {
+                        a.avatar_url = Some(url.clone());
+                        a.avatar_at = Some(t);
+                        changed.push(*id);
+                    }
+                }
+            }
+        }
+        if !changed.is_empty() {
+            s.save();
+        }
+        drop(s);
+        for id in changed {
+            emit_account(&app, id);
+        }
+    });
+    Ok(())
+}
+
+/// Name and creator of a place, from the store's cache or the public games
+/// API. `Ok(None)` means Roblox does not know that place id.
+#[tauri::command]
+pub async fn place_info(app: AppHandle, place_id: u64) -> Result<Option<ram_core::model::Game>, String> {
+    if place_id == 0 {
+        return Ok(None);
+    }
+    {
+        let st = app.state::<Shared>();
+        let s = st.lock().map_err(|_| "application state is unavailable".to_string())?;
+        if let Some(g) = s.store.games.iter().find(|g| g.place_id == place_id) {
+            if g.builtin || g.fetched_at.map(|at| now() - at < 7 * 24 * 3600).unwrap_or(false) {
+                return Ok(Some(g.clone()));
+            }
+        }
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || roblox_profile::place_info(&WinHttp::new(), place_id))
+        .await
+        .map_err(|e| e.to_string())?;
+    match result {
+        Ok(info) => {
+            let st = app.state::<Shared>();
+            let mut s = st.lock().map_err(|_| "application state is unavailable".to_string())?;
+            let t = now();
+            let game = match s.store.games.iter_mut().find(|g| g.place_id == place_id) {
+                Some(g) => {
+                    g.name = info.name;
+                    g.creator = info.creator;
+                    g.universe_id = Some(info.universe_id);
+                    g.fetched_at = Some(t);
+                    g.clone()
+                }
+                None => {
+                    let g = ram_core::model::Game {
+                        place_id,
+                        universe_id: Some(info.universe_id),
+                        name: info.name,
+                        creator: info.creator,
+                        fetched_at: Some(t),
+                        ..Default::default()
+                    };
+                    s.store.games.push(g.clone());
+                    // Keep the cache bounded; built-ins and pinned entries stay.
+                    let keep: Vec<ram_core::model::Game> = s.store.games.iter().filter(|g| g.builtin || g.pinned).cloned().collect();
+                    let mut rest: Vec<ram_core::model::Game> = s.store.games.iter().filter(|g| !(g.builtin || g.pinned)).cloned().collect();
+                    if rest.len() > 50 {
+                        rest.drain(0..rest.len() - 50);
+                    }
+                    s.store.games = keep.into_iter().chain(rest).collect();
+                    g
+                }
+            };
+            s.save();
+            Ok(Some(game))
+        }
+        Err(LaunchError::Malformed) => Ok(None),
+        Err(e) => Err(describe(&e)),
+    }
 }
 
 /// Queues launches for several accounts to a place (optionally a specific
@@ -187,6 +307,100 @@ pub fn follow(app: AppHandle, state: State<'_, Shared>, ids: Vec<AccountId>, use
     Ok(())
 }
 
+/// One launch at a time: the graphics files are shared by every client, so
+/// a launch holds this until its client has read them and they are back
+/// to the user's own values.
+static LAUNCH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// How long to wait for the client to read its settings before restoring
+/// them anyway.
+const READ_WAIT_SECS: u64 = 60;
+
+/// Writes the FPS cap / quality (XML) and rendering flags (JSON) for one
+/// account's launch. Returns the undo handles, or `None` when nothing is to
+/// be written (settings off, Main account, no location known).
+fn apply_graphics(app: &AppHandle, id: AccountId) -> Option<(Option<client_settings::XmlUndo>, Option<client_settings::FlagUndo>, Vec<String>)> {
+    let st = app.state::<Shared>();
+    let mut s = st.lock().ok()?;
+    let eff = client_settings::effective(&s.store.graphics, &s.store.account_graphics(id), s.store.is_main(id))?;
+    let mut notes = Vec::new();
+    let mut xml_undo = None;
+    if eff.fps_cap > 0 || eff.low_graphics {
+        let path = ram_win::paths::local_app_data().map(|p| p.join("Roblox").join("GlobalBasicSettings_13.xml"));
+        if let Some(path) = path {
+            let file = client_settings::XmlFile::new(path);
+            let (_, current) = file.read();
+            let want = client_settings::xml_for_launch(&eff, &current);
+            match file.apply(&want) {
+                Ok(u) => {
+                    s.store.xml_undo = Some(u.clone());
+                    s.save();
+                    xml_undo = Some(u);
+                }
+                Err(e) => notes.push(format!("FPS cap / quality not applied: {e}")),
+            }
+        }
+    }
+    let mut flag_undo = None;
+    let set = client_settings::flag_set(&eff);
+    if !set.is_empty() {
+        let launcher = ram_win::launcher_info::detect();
+        match launcher.flag_file {
+            Some(path) => match client_settings::FlagFile::new(path).apply(&set) {
+                Ok(u) => flag_undo = Some(u),
+                Err(e) => notes.push(format!("rendering flags not applied: {e}")),
+            },
+            None => notes.push("rendering flags not applied: no Roblox client folder was found".into()),
+        }
+    }
+    s.log.info(&format!(
+        "launch {id}: graphics applied (fps {}, low {}, lighter {}, {} flags){}",
+        eff.fps_cap,
+        eff.low_graphics,
+        eff.lighter.is_some(),
+        set.len(),
+        if notes.is_empty() { String::new() } else { format!("; {}", notes.join("; ")) }
+    ));
+    Some((xml_undo, flag_undo, notes))
+}
+
+/// Waits until the watcher reports that the client with this tracker id
+/// has read its settings (or it exits, or the wait times out).
+fn wait_for_read(app: &AppHandle, btid: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(READ_WAIT_SECS);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let st = app.state::<Shared>();
+        let Ok(s) = st.lock() else { return };
+        if s.diag.reads.get(btid).copied().unwrap_or(false) {
+            drop(s);
+            // Roblox reads the files a moment after the first mark.
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            return;
+        }
+    }
+    if let Ok(s) = app.state::<Shared>().lock() {
+        s.log.warn(&format!("launch: no settings-read mark within {READ_WAIT_SECS} s; restoring anyway"));
+    }
+}
+
+fn restore_graphics(app: &AppHandle, xml_undo: Option<client_settings::XmlUndo>, flag_undo: Option<client_settings::FlagUndo>) {
+    let st = app.state::<Shared>();
+    let Ok(mut s) = st.lock() else { return };
+    if let Some(u) = flag_undo {
+        if let Err(e) = u.put_back() {
+            s.log.warn(&format!("flag restore: {e}"));
+        }
+    }
+    if let Some(u) = xml_undo {
+        if let Err(e) = u.put_back() {
+            s.log.warn(&format!("settings restore: {e}"));
+        }
+        s.store.xml_undo = None;
+        s.save();
+    }
+}
+
 fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model_target: Target, spacing: u32) {
     std::thread::spawn(move || {
         let http = WinHttp::new();
@@ -205,41 +419,79 @@ fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model
                 emit_launch(&app, id, "Failed", "No cookie stored. Add one, or sign in through Open Browser.");
                 continue;
             };
+            let _serial = LAUNCH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
             emit_launch(&app, id, "Launching", "Requesting a ticket…");
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
             match roblox::prepare_launch(&http, &cookie, &target, None, now_ms) {
-                Ok((uri, _btid)) => match ram_win::launch::launch_protocol(&uri) {
-                    Ok(()) => {
-                        let st = app.state::<Shared>();
-                        if let Ok(mut s) = st.lock() {
-                            let t = now();
-                            if let Some(a) = s.store.account_mut(id) {
-                                a.last_used = Some(t);
-                            }
-                            if model_target.place_id().unwrap_or(0) != 0 {
-                                s.store.push_recent(RecentLaunch { account: id, target: model_target.clone(), at: t });
-                            }
-                            s.save();
+                Ok((uri, btid)) => {
+                    let graphics = apply_graphics(&app, id);
+                    if let Some((_, _, notes)) = &graphics {
+                        for n in notes {
+                            emit_launch(&app, id, "Launching", n.clone());
                         }
-                        emit_launch(&app, id, "Launching", "Client starting…");
                     }
-                    Err(e) => emit_launch(&app, id, "Failed", format!("Could not start the Roblox client: {e}")),
-                },
+                    {
+                        let st = app.state::<Shared>();
+                        let guard = st.lock();
+                        if let Ok(mut s) = guard {
+                            s.diag.launches.push(crate::cmd_diag::PendingLaunch { account: id, browser_tracker_id: btid.clone(), at: now() });
+                            s.diag.reads.remove(&btid);
+                        }
+                    }
+                    match ram_win::launch::launch_protocol(&uri) {
+                        Ok(()) => {
+                            let st = app.state::<Shared>();
+                            if let Ok(mut s) = st.lock() {
+                                let t = now();
+                                if let Some(a) = s.store.account_mut(id) {
+                                    a.last_used = Some(t);
+                                }
+                                if model_target.place_id().unwrap_or(0) != 0 {
+                                    s.store.push_recent(RecentLaunch { account: id, target: model_target.clone(), at: t });
+                                }
+                                s.log.info(&format!("launch {id}: client starting (tracker {btid})"));
+                                s.save();
+                            }
+                            emit_launch(&app, id, "Launching", "Client starting…");
+                            if let Some((xml_undo, flag_undo, _)) = graphics {
+                                if xml_undo.is_some() || flag_undo.is_some() {
+                                    wait_for_read(&app, &btid);
+                                    restore_graphics(&app, xml_undo, flag_undo);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if let Some((xml_undo, flag_undo, _)) = graphics {
+                                restore_graphics(&app, xml_undo, flag_undo);
+                            }
+                            if let Ok(s) = app.state::<Shared>().lock() {
+                                s.log.error(&format!("launch {id}: could not start the client: {e}"));
+                            }
+                            emit_launch(&app, id, "Failed", format!("Could not start the Roblox client: {e}"));
+                        }
+                    }
+                }
                 Err(LaunchError::Unauthorized) => {
                     let st = app.state::<Shared>();
                     if let Ok(mut s) = st.lock() {
                         if let Some(a) = s.store.account_mut(id) {
                             signin::apply(&mut a.sign_in, &CheckOutcome::AuthorizationRejected, now());
                         }
+                        s.log.warn(&format!("launch {id}: cookie rejected"));
                         s.save();
                     }
                     emit_account(&app, id);
                     emit_launch(&app, id, "Failed", "The stored cookie is no longer valid. Sign in again through Open Browser.");
                 }
-                Err(e) => emit_launch(&app, id, "Failed", describe(&e)),
+                Err(e) => {
+                    if let Ok(s) = app.state::<Shared>().lock() {
+                        s.log.warn(&format!("launch {id}: {}", describe(&e)));
+                    }
+                    emit_launch(&app, id, "Failed", describe(&e));
+                }
             }
         }
     });

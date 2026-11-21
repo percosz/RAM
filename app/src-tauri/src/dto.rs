@@ -23,6 +23,9 @@ pub struct AccountView {
     pub last_used: Option<i64>,
     pub robux: Option<i64>,
     pub premium: Option<bool>,
+    pub avatar_url: Option<String>,
+    pub fps_cap: Option<u32>,
+    pub full_quality: bool,
     /// Client state label: "", Queued, Launching, Running, Unconfirmed, Exited, Failed, Paused.
     pub client: String,
     pub client_pid: Option<u32>,
@@ -44,12 +47,16 @@ pub struct Snapshot {
     pub version: String,
     pub accounts: Vec<AccountView>,
     pub settings: Settings,
+    pub graphics: ram_core::client_settings::GraphicsSettings,
     pub games: Vec<Game>,
     pub vault: VaultStatus,
     pub main_account: Option<AccountId>,
     pub multi_instance_held: bool,
     pub startup_note: String,
     pub data_dir: String,
+    pub browser_name: String,
+    pub launcher_name: String,
+    pub github_repo: String,
 }
 
 #[derive(Deserialize)]
@@ -60,6 +67,11 @@ pub struct AccountPatch {
     pub tags: Option<Vec<String>>,
     pub notes: Option<String>,
     pub favorite: Option<bool>,
+    pub full_quality: Option<bool>,
+    pub fps_cap: Option<u32>,
+    /// Set together with `fps_cap: None` to go back to the global cap.
+    #[serde(default)]
+    pub clear_fps_cap: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -114,6 +126,9 @@ pub fn account_view(s: &AppState, id: AccountId) -> Option<AccountView> {
         last_used: a.last_used,
         robux: a.robux,
         premium: a.premium,
+        avatar_url: a.avatar_url.clone(),
+        fps_cap: a.fps_cap,
+        full_quality: a.full_quality,
         client: state.label().to_string(),
         client_pid: s.clients.link_for_account(a.id).map(|l| l.process.pid),
     })
@@ -124,11 +139,15 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         version: env!("CARGO_PKG_VERSION").to_string(),
         accounts: s.store.accounts.iter().filter_map(|a| account_view(s, a.id)).collect(),
         settings: s.store.settings.clone(),
+        graphics: s.store.graphics.clone(),
         games: s.store.games.clone(),
         vault: vault_status(s),
         main_account: s.store.main_account,
         multi_instance_held: s.singleton.as_ref().map(|h| h.is_held()).unwrap_or(false),
         startup_note: s.startup_note.clone(),
         data_dir: s.data_dir.display().to_string(),
+        browser_name: crate::cmd_browser::pick_browser().map(|b| b.name).unwrap_or_default(),
+        launcher_name: ram_win::launcher_info::detect().name,
+        github_repo: crate::cmd_update::GITHUB_REPO.to_string(),
     }
 }

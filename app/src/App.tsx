@@ -1,37 +1,40 @@
 import { useEffect, useState } from "react";
-import { Users, Activity, Settings as SettingsIcon, Lock, Unlock, ShieldOff } from "lucide-react";
+import { Users, Activity, Settings as SettingsIcon, Lock, Unlock, ShieldOff, Stethoscope, ArrowDownToLine } from "lucide-react";
 import { api } from "./api";
 import { AppProvider, useApp } from "./store";
 import { Toasts } from "./components";
 import { AccountsView } from "./views/Accounts";
 import { SettingsView } from "./views/Settings";
 import { ClientsView } from "./views/Clients";
+import { DiagnosticsView } from "./views/Diagnostics";
+import { UpdateDialog, WhatsNewDialog } from "./views/Updates";
 import { VaultUnlockDialog } from "./dialogs";
 import "./styles/ui.css";
 import "./styles/app.css";
 
-type View = "accounts" | "clients" | "settings";
+type View = "accounts" | "clients" | "diagnostics" | "settings";
 
 function Shell() {
-  const { snap, settings, accounts, selected, setSelected, toasts, dismissToast, refresh } = useApp();
+  const { snap, accounts, selected, setSelected, toasts, dismissToast, refresh, update, crashCount } = useApp();
   const [view, setView] = useState<View>("accounts");
   const [unlock, setUnlock] = useState(false);
+  const [showUpdate, setShowUpdate] = useState(false);
   const vault = snap?.vault;
-  // Classic: alyae's single-pane look — a slim top bar instead of the sidebar.
-  const classic = settings?.layout === "Classic";
   // Dev hook for screenshots (env vars; no effect in normal use).
   const [hinted, setHinted] = useState(false);
   useEffect(() => {
     if (hinted || !snap) return;
     setHinted(true);
     api.startHint().then(([v, first]) => {
-      if (v === "clients" || v === "settings" || v === "accounts") setView(v);
+      if (v === "clients" || v === "settings" || v === "accounts" || v === "diagnostics") setView(v);
       if (first && snap.accounts.length) setSelected([snap.accounts[0]!.id]);
     }).catch(() => {});
   }, [snap, hinted, setSelected]);
   const valid = accounts.filter((a) => a.sign_in.state === "Verified").length;
   const invalid = accounts.filter((a) => a.sign_in.state === "SignedOut").length;
   const running = accounts.filter((a) => a.client === "Running").length;
+  // "What's new" once after an update: the stored seen_version lags the running one.
+  const whatsNew = !!snap && snap.settings.seen_version !== "" && snap.settings.seen_version !== snap.version;
 
   const vaultPill = vault && (
     <div
@@ -45,31 +48,31 @@ function Shell() {
       </span>
     </div>
   );
-  const tabs: Array<[View, string, React.ReactNode]> = [["accounts", "Accounts", <Users />], ["clients", "Clients", <Activity />], ["settings", "Settings", <SettingsIcon />]];
+  const tabs: Array<[View, string, React.ReactNode]> = [["accounts", "Accounts", <Users />], ["clients", "Clients", <Activity />], ["diagnostics", "Diagnostics", <Stethoscope />], ["settings", "Settings", <SettingsIcon />]];
 
   return (
-    <div className={`shell ${classic ? "classic" : ""}`}>
-      {classic ? (
-        <header className="topbar">
-          <div className="brand"><span className="logo">R</span><b>RAM</b></div>
-          <div className="tabs">
-            {tabs.map(([id, name, icon]) => <button key={id} className={`tab ${view === id ? "active" : ""}`} onClick={() => setView(id)}>{icon} {name}</button>)}
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="brand"><span className="logo">R</span><b>RAM</b></div>
+        {tabs.map(([id, name, icon]) => (
+          <button key={id} className={`nav ${view === id ? "active" : ""}`} onClick={() => setView(id)}>
+            {icon} {name}{id === "diagnostics" && crashCount > 0 && <span className="pip" title={`${crashCount} new crash record${crashCount === 1 ? "" : "s"}`} />}
+          </button>
+        ))}
+        <div className="spacer" />
+        {update && update.state !== "dismissed" && (
+          <div className="update-pill" onClick={() => setShowUpdate(true)} title="A new RAM is available">
+            <ArrowDownToLine />
+            <span className="grow ellipsis">{update.state === "installing" ? `Installing ${update.version}…` : update.state === "downloading" ? `Downloading ${update.version}…` : `RAM ${update.version} available`}</span>
           </div>
-          <span className="grow" />
-          {vaultPill}
-        </header>
-      ) : (
-        <aside className="sidebar">
-          <div className="brand"><span className="logo">R</span><b>RAM</b></div>
-          {tabs.map(([id, name, icon]) => <button key={id} className={`nav ${view === id ? "active" : ""}`} onClick={() => setView(id)}>{icon} {name}</button>)}
-          <div className="spacer" />
-          {vaultPill}
-        </aside>
-      )}
+        )}
+        {vaultPill}
+      </aside>
       <main className="content">
         {view === "accounts" && <AccountsView onNeedUnlock={() => setUnlock(true)} />}
         {view === "clients" && <ClientsView />}
-        {view === "settings" && <SettingsView onNeedUnlock={() => setUnlock(true)} />}
+        {view === "diagnostics" && <DiagnosticsView />}
+        {view === "settings" && <SettingsView onNeedUnlock={() => setUnlock(true)} onShowUpdate={() => setShowUpdate(true)} />}
       </main>
       <footer className="statusbar">
         <span><b className="accent">{selected.length}</b> selected</span>
@@ -86,6 +89,8 @@ function Shell() {
       </footer>
       <Toasts items={toasts} dismiss={dismissToast} />
       {unlock && <VaultUnlockDialog onClose={() => { setUnlock(false); void refresh(); }} />}
+      {showUpdate && update && <UpdateDialog onClose={() => setShowUpdate(false)} />}
+      {whatsNew && !showUpdate && <WhatsNewDialog />}
     </div>
   );
 }

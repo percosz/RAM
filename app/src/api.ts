@@ -32,6 +32,9 @@ export interface Account {
   last_used: number | null;
   robux: number | null;
   premium: boolean | null;
+  avatar_url: string | null;
+  fps_cap: number | null;
+  full_quality: boolean;
   client: string;
   client_pid: number | null;
 }
@@ -40,27 +43,24 @@ export type ThemeKind =
   | "System" | "Light" | "Dark" | "Mocha" | "Macchiato" | "Frappe" | "Latte"
   | "Nord" | "Dracula" | "Gruvbox" | "RosePine" | "Lineage";
 
+export type Density = "Compact" | "Normal" | "Comfortable" | "Large";
+
 export interface Settings {
   theme: ThemeKind;
   accent: number | null;
-  compact: boolean;
-  layout: "Modern" | "Classic";
+  density: Density;
   corner_radius: number;
-  direct_launch: boolean;
   multi_instance: boolean;
-  launch_concurrency: number;
   launch_spacing_secs: number;
   launch_timeout_secs: number;
   include_main_in_batch: boolean;
-  oauth_client_id: string;
-  oauth_port: number;
-  idle_reminder_minutes: number;
+  check_updates: boolean;
+  seen_version: string;
   window: unknown;
   last_import_dir: string;
-  default_destination: number | null;
 }
 
-export interface Game { place_id: number; universe_id: number | null; name: string; pinned: boolean; builtin: boolean; }
+export interface Game { place_id: number; universe_id: number | null; name: string; pinned: boolean; builtin: boolean; creator: string; fetched_at: number | null; }
 
 export interface VaultStatus {
   configured: boolean;
@@ -72,17 +72,40 @@ export interface VaultStatus {
   hello_available: boolean;
 }
 
+export type Msaa = "Default" | "X1" | "X2" | "X4";
+export type Texture = "Default" | "Lowest" | "Low" | "Medium" | "High";
+export type RenderMode = "Default" | "D3D11" | "Vulkan" | "OpenGl";
+export interface RenderFlags { msaa: Msaa; texture: Texture; mode: RenderMode; gray_sky: boolean; no_grass: boolean; lowest_frm: boolean; pause_voxelizer: boolean; }
+export interface GraphicsSettings {
+  enabled: boolean;
+  fps_cap: number;
+  low_graphics: boolean;
+  lighter_rendering: boolean;
+  render: RenderFlags;
+  custom_flags: Record<string, string>;
+}
+
 export interface Snapshot {
   version: string;
   accounts: Account[];
   settings: Settings;
+  graphics: GraphicsSettings;
   games: Game[];
   vault: VaultStatus;
   main_account: number | null;
   multi_instance_held: boolean;
   startup_note: string;
   data_dir: string;
+  /** Name of the browser Open Browser uses ("Brave", "Chrome"…), or "" when none is usable. */
+  browser_name: string;
+  /** How launches reach Roblox: "Froststrap", "Bloxstrap", … or "Roblox". */
+  launcher_name: string;
+  /** "owner/RAM" on GitHub, where releases come from. */
+  github_repo: string;
 }
+
+export interface UpdateInfo { version: string; notes: string; date: string; }
+export interface UpdateProgress { got: number; total: number; done: boolean; }
 
 export interface AccountPatch {
   id: number;
@@ -91,11 +114,30 @@ export interface AccountPatch {
   tags?: string[];
   notes?: string;
   favorite?: boolean;
+  full_quality?: boolean;
+  fps_cap?: number | null;
+  clear_fps_cap?: boolean;
 }
 
 export interface LaunchEvent { account: number; state: string; message: string; }
 
 export interface ClientView { pid: number; account: number | null; account_name: string | null; working_set_mb: number; private_mb: number; }
+
+export type EndKind = "Closed" | "Disconnected" | "Crashed" | "Teleported" | "Replaced" | "SignedOut";
+export interface CrashRecord {
+  id: number;
+  account: number | null;
+  username: string;
+  kind: EndKind;
+  at: number;
+  uptime_secs: number;
+  reason: string;
+  place_id: number | null;
+  place_name: string;
+  has_log: boolean;
+  pid: number;
+}
+export interface LogLine { level: "debug" | "info" | "warn" | "error"; text: string; }
 
 export interface PlanItem { index: number; kind: string; label: string; detail: string; action: string; selectable: boolean; selected: boolean; }
 export interface PlanView { folder: string; items: PlanItem[]; notices: string[]; add: number; update: number; unchanged: number; skip: number; cookies_available: number; }
@@ -109,6 +151,7 @@ export const api = {
   setMain: (id: number | null) => invoke<void>("set_main", { id }),
   reorderAccounts: (ids: number[]) => invoke<void>("reorder_accounts", { ids }),
   setSettings: (settings: Settings) => invoke<Settings>("set_settings", { settings }),
+  setGraphics: (graphics: GraphicsSettings) => invoke<GraphicsSettings>("set_graphics", { graphics }),
   openDataFolder: () => invoke<string>("open_data_folder"),
 
   vaultStatus: () => invoke<VaultStatus>("vault_status"),
@@ -126,10 +169,12 @@ export const api = {
   cookieReveal: (id: number, password?: string) => invoke<string>("cookie_reveal", { id, password: password ?? null }),
 
   checkAccounts: (ids: number[]) => invoke<void>("check_accounts", { ids }),
+  refreshAvatars: (force = false) => invoke<void>("refresh_avatars", { force }),
+  placeInfo: (placeId: number) => invoke<Game | null>("place_info", { placeId }),
   launch: (ids: number[], placeId: number, jobId: string | null) => invoke<void>("launch", { ids, placeId, jobId }),
   follow: (ids: number[], username: string) => invoke<void>("follow", { ids, username }),
 
-  openBrowser: (id: number) => invoke<void>("open_browser", { id }),
+  openBrowser: (id: number) => invoke<string>("open_browser", { id }),
   browserCapture: (id: number) => invoke<void>("browser_capture", { id }),
   browserClear: (id: number) => invoke<void>("browser_clear", { id }),
 
@@ -139,9 +184,38 @@ export const api = {
   clientsSnapshot: () => invoke<ClientView[]>("clients_snapshot"),
   closeClient: (pid: number) => invoke<void>("close_client", { pid }),
 
+  crashes: () => invoke<CrashRecord[]>("crashes_list"),
+  crashesClear: () => invoke<void>("crashes_clear"),
+  crashOpenLog: (id: number) => invoke<void>("crash_open_log", { id }),
+  crashesExport: (path: string) => invoke<void>("crashes_export", { path }),
+  logTail: (lines: number) => invoke<LogLine[]>("log_tail", { lines }),
+  openLogFolder: () => invoke<void>("open_log_folder"),
+  diagnosticsText: () => invoke<string>("diagnostics_text"),
+
+  updateCheck: () => invoke<UpdateInfo | null>("update_check"),
+  updateInstall: () => invoke<void>("update_install"),
+  installKind: () => invoke<"installed" | "portable">("install_kind"),
+  markSeenVersion: () => invoke<void>("mark_seen_version"),
+  releaseNotes: () => invoke<string>("release_notes"),
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
+
   onAccountUpdated: (cb: (id: number) => void): Promise<UnlistenFn> => listen<number>("account-updated", (e) => cb(e.payload)),
   onLaunchStatus: (cb: (e: LaunchEvent) => void): Promise<UnlistenFn> => listen<LaunchEvent>("launch-status", (e) => cb(e.payload)),
+  onCrashesChanged: (cb: (n: number) => void): Promise<UnlistenFn> => listen<number>("crashes-changed", (e) => cb(e.payload)),
+  onUpdateProgress: (cb: (p: UpdateProgress) => void): Promise<UnlistenFn> => listen<UpdateProgress>("update-progress", (e) => cb(e.payload)),
 };
+
+/** Human label for how a client ended. */
+export function endKindLabel(k: EndKind): string {
+  switch (k) {
+    case "Closed": return "Closed";
+    case "Disconnected": return "Disconnected by Roblox";
+    case "Crashed": return "Crashed";
+    case "Teleported": return "Teleported";
+    case "Replaced": return "Replaced by another client";
+    case "SignedOut": return "Sign-in refused";
+  }
+}
 
 /** Human label for a sign-in state. */
 export function signInLabel(s: SignInState): string {
