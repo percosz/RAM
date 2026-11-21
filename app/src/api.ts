@@ -56,6 +56,7 @@ export interface Settings {
   include_main_in_batch: boolean;
   check_updates: boolean;
   seen_version: string;
+  hide_usernames: boolean;
   window: unknown;
   last_import_dir: string;
 }
@@ -174,7 +175,8 @@ export const api = {
   vaultRemove: () => invoke<VaultStatus>("vault_remove"),
   vaultOptions: (autoLockSecs: number, requireHello: boolean) => invoke<VaultStatus>("vault_options", { autoLockSecs, requireHello }),
   vaultTick: () => invoke<boolean>("vault_tick"),
-  cookieSet: (id: number, cookie: string) => invoke<void>("cookie_set", { id, cookie }),
+  /** Stores a pasted cookie after Roblox confirms it belongs to this account; returns the username. */
+  cookieSet: (id: number, cookie: string) => invoke<string>("cookie_set", { id, cookie }),
   cookieRemove: (id: number) => invoke<void>("cookie_remove", { id }),
   cookieReveal: (id: number, password?: string) => invoke<string>("cookie_reveal", { id, password: password ?? null }),
 

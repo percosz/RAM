@@ -146,8 +146,28 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         multi_instance_held: s.singleton.as_ref().map(|h| h.is_held()).unwrap_or(false),
         startup_note: s.startup_note.clone(),
         data_dir: s.data_dir.display().to_string(),
-        browser_name: crate::cmd_browser::pick_browser().map(|b| b.name).unwrap_or_default(),
-        launcher_name: ram_win::launcher_info::detect().name,
+        browser_name: environment().0,
+        launcher_name: environment().1,
         github_repo: crate::cmd_update::GITHUB_REPO.to_string(),
     }
+}
+
+/// Browser and launcher names for the snapshot. Looked up in the registry
+/// at most once a minute: the snapshot is taken on every account event.
+fn environment() -> (String, String) {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, String, String)>> = Mutex::new(None);
+    if let Ok(mut c) = CACHE.lock() {
+        if let Some((at, b, l)) = c.as_ref() {
+            if at.elapsed() < Duration::from_secs(60) {
+                return (b.clone(), l.clone());
+            }
+        }
+        let b = crate::cmd_browser::pick_browser().map(|b| b.name).unwrap_or_default();
+        let l = ram_win::launcher_info::detect().name;
+        *c = Some((Instant::now(), b.clone(), l.clone()));
+        return (b, l);
+    }
+    (String::new(), "Roblox".into())
 }

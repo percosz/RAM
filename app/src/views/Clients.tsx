@@ -4,7 +4,7 @@ import { Btn } from "../components";
 import { useApp } from "../store";
 
 export function ClientsView() {
-  const { toast } = useApp();
+  const { toast, accounts, nameOf } = useApp();
   const [rows, setRows] = useState<ClientView[]>([]);
   useEffect(() => {
     let alive = true;
@@ -26,7 +26,7 @@ export function ClientsView() {
           <tbody>
             {rows.map((c) => (
               <tr key={c.pid}>
-                <td>{c.account_name ?? <span className="muted">Unassigned</span>}</td>
+                <td>{c.account != null ? nameOf(accounts.find((a) => a.id === c.account)?.username ?? c.account_name ?? "") : <span className="muted">Unassigned</span>}</td>
                 <td className="mono muted">{c.pid}</td>
                 <td style={{ textAlign: "right" }}>{c.working_set_mb} MB</td>
                 <td style={{ textAlign: "right" }}>{c.private_mb} MB</td>

@@ -108,6 +108,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
             <span />
             <div className="hint">Compact shows one line per account; the others show the alias and description underneath.</div>
           </div>
+          <Toggle checked={settings.hide_usernames} onChange={(c) => saveSettings({ hide_usernames: c })} label="Hide usernames" hint="Shows only the first three characters of each username, for screenshots and streams. Aliases stay visible." />
           <div className="kv">
             <span>Corners</span>
             <input type="range" min={0} max={16} value={settings.corner_radius} onChange={(e) => saveSettings({ corner_radius: Number(e.target.value) })} />

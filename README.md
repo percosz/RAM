@@ -34,7 +34,9 @@ auto-updater verifies every update against RAM's own release signature.
 - **Accounts.** A searchable, groupable list with Roblox headshots, the
   username first and your alias and description underneath, a Valid/Invalid
   badge, Robux and Premium. Tick boxes on rows and group headers pick any set
-  of accounts; the details pane edits alias, group and description.
+  of accounts; the details pane edits alias, group and description. Drag rows
+  to reorder, right-click for actions, and hide usernames with one click for
+  screenshots.
 - **Launch.** Type a **Place ID** (Rogue Lineage is pre-filled; the bar shows
   the place's name) and optional **Job ID**, tick accounts, press **Join
   Server**. Or type a **username** and **Follow** them into their game.
@@ -45,8 +47,8 @@ auto-updater verifies every update against RAM's own release signature.
 - **Open Browser.** Opens roblox.com in your default browser (Brave, Chrome,
   Edge, Vivaldi) already signed in as that account, each account in its own
   browser profile. With no cookie stored yet it shows the sign-in page: sign
-  in there and press **Capture session**. The profile's cookies are wiped when
-  the window closes; the vault stays the only store.
+  in there and RAM saves the session by itself. The profile's cookies are
+  wiped when the window closes; the vault stays the only store.
 - **Login check.** The RoALT method: `users.roblox.com/v1/users/authenticated`
   with the cookie. 401 means invalid; a "bound session" or verification
   challenge is reported as such; rate limits and network errors never change
@@ -91,9 +93,9 @@ auto-updater verifies every update against RAM's own release signature.
 
 1. Install RAM (or unzip the portable build) and run it.
 2. **Settings → Security → Set up vault** (Windows account or master password).
-3. **Add** an account, then **Open Browser**, sign in, and **Capture session**.
-   Or paste a cookie with **Set cookie…**. Or **Import** from Roblox Account
-   Manager with the cookie switch on.
+3. **Add** an account: **Sign in with Roblox** (your browser opens, RAM saves
+   the session), paste a cookie, or paste many at once. Or **Import** from
+   Roblox Account Manager with the cookie switch on.
 4. Mark your own account as **Main** (details pane), then turn on
    **Settings → Performance** if you want light alts.
 5. Tick accounts, keep the Place ID (Rogue Lineage) or type another, press
@@ -104,6 +106,8 @@ auto-updater verifies every update against RAM's own release signature.
 | Keys | Action |
 |---|---|
 | Tick box | Add or remove one account from the selection |
+| Right-click | Actions for that account or the selection: copy, paste cookie, groups, Main, remove |
+| Drag a row | Reorder accounts; drop into another group to move it there |
 | Click / Ctrl+click / Shift+click | Select / toggle / range-select accounts |
 | Ctrl+A | Select all (Main excluded) |
 | Enter | Join Server with the selected accounts |

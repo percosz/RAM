@@ -78,7 +78,19 @@ pub fn open_browser(app: AppHandle, state: State<'_, Shared>, id: AccountId) -> 
         let dir2 = dir.clone();
         let pid = session.pid;
         std::thread::spawn(move || {
-            while !sysbrowser::wait_exit(pid, Duration::from_secs(3600)) {}
+            // While the window is open, keep the vault in step with it: a
+            // sign-in done there, or a cookie Roblox rotated, is captured
+            // without the user pressing anything (only when it signs in as
+            // this same account).
+            let mut last_seen: Option<String> = None;
+            while !sysbrowser::wait_exit(pid, Duration::from_secs(4)) {
+                if let Ok(Some(c)) = sysbrowser::read_cookie(&dir2) {
+                    if last_seen.as_deref() != Some(c.as_str()) {
+                        last_seen = Some(c.clone());
+                        capture_if_same_account(&app2, id, &c);
+                    }
+                }
+            }
             std::thread::sleep(Duration::from_millis(800));
             let _ = sysbrowser::clear_cookies(&dir2);
             if let Ok(s) = app2.state::<Shared>().lock() {
@@ -89,7 +101,7 @@ pub fn open_browser(app: AppHandle, state: State<'_, Shared>, id: AccountId) -> 
     Ok(if cookie.is_some() {
         String::new()
     } else {
-        format!("No cookie stored: sign in inside {} and then press Capture session.", browser.name)
+        format!("No cookie stored: sign in inside {}; RAM saves the session by itself.", browser.name)
     })
 }
 
@@ -127,4 +139,40 @@ pub fn browser_clear(state: State<'_, Shared>, id: AccountId) -> Result<(), Stri
     }
     let _ = sysbrowser::clear_cookies(&dir);
     Ok(())
+}
+
+/// Stores `cookie` for account `id` when it differs from the stored one and
+/// Roblox says it belongs to that account (or the account has no confirmed
+/// identity yet). Used by the open-window watcher.
+fn capture_if_same_account(app: &AppHandle, id: AccountId, cookie: &str) {
+    let (stored, expected_id, expected_name) = {
+        let st = app.state::<Shared>();
+        let Ok(mut s) = st.lock() else { return };
+        if !s.vault.is_unlocked() {
+            return;
+        }
+        let stored = s.cookie(id);
+        let Some(a) = s.store.account(id) else { return };
+        (stored, if a.user_id_confirmed { a.roblox_user_id } else { None }, a.username.clone())
+    };
+    if stored.as_deref() == Some(cookie) {
+        return;
+    }
+    let Ok(who) = ram_core::roblox::whoami_full(&ram_win::WinHttp::new(), cookie) else { return };
+    let same = match expected_id {
+        Some(uid) => uid == who.user.id,
+        None => who.user.name.eq_ignore_ascii_case(&expected_name),
+    };
+    let st = app.state::<Shared>();
+    let Ok(mut s) = st.lock() else { return };
+    if !same {
+        s.log.warn(&format!("browser: the window for account {id} is signed in as a different user; not captured"));
+        return;
+    }
+    let value = who.rotated_cookie.as_deref().unwrap_or(cookie);
+    if s.vault.set_secret(id, value, &crate::svc::WinEntropy, now()).is_ok() {
+        s.log.info(&format!("browser: captured the session for account {id} from its window"));
+    }
+    drop(s);
+    crate::cmd_launch::start_check(app.clone(), id);
 }

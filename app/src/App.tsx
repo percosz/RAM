@@ -20,6 +20,13 @@ function Shell() {
   const [unlock, setUnlock] = useState(false);
   const [showUpdate, setShowUpdate] = useState(false);
   const vault = snap?.vault;
+  // The webview's own right-click menu (Back, Refresh, Print) has no place
+  // in an app; text fields keep theirs for copy and paste.
+  useEffect(() => {
+    const block = (e: MouseEvent) => { const el = e.target as HTMLElement; if (!el.closest("input, textarea")) e.preventDefault(); };
+    window.addEventListener("contextmenu", block);
+    return () => window.removeEventListener("contextmenu", block);
+  }, []);
   // Dev hook for screenshots (env vars; no effect in normal use).
   const [hinted, setHinted] = useState(false);
   useEffect(() => {

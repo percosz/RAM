@@ -172,22 +172,6 @@ export function AddAccountDialog({ onClose, onImport }: { onClose: () => void; o
   );
 }
 
-export function SetCookieDialog({ id, name, onClose }: { id: number; name: string; onClose: () => void }) {
-  const { toast } = useApp();
-  const [cookie, setCookie] = useState("");
-  const [err, setErr] = useState("");
-  const submit = async () => {
-    try { await api.cookieSet(id, cookie); toast(`Cookie stored for ${name}. Checking…`, "good"); onClose(); } catch (e) { setErr(errText(e)); }
-  };
-  return (
-    <Modal title={`Store cookie — ${name}`} onClose={onClose} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind="primary" onClick={submit} disabled={cookie.trim().length < 32}>Store</Btn></>}>
-      <p className="muted" style={{ margin: 0 }}>Paste the account's <span className="mono">.ROBLOSECURITY</span> cookie. It is encrypted in the vault and never written to the plain data file or the log.</p>
-      <Field label=".ROBLOSECURITY"><input className="input mono" type="password" autoFocus value={cookie} onChange={(e) => setCookie(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="_|WARNING:-DO-NOT-SHARE-THIS…" /></Field>
-      {err && <div className="bad">{err}</div>}
-    </Modal>
-  );
-}
-
 export function RevealCookieDialog({ id, name, needPassword, onClose }: { id: number; name: string; needPassword: boolean; onClose: () => void }) {
   const { toast } = useApp();
   const [password, setPassword] = useState("");

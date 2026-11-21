@@ -138,3 +138,10 @@
 .notes h3 { margin: 10px 0 4px; font-size: 13px; }
 .notes ul { margin: 0; padding-left: 18px; }
 .notes li { margin: 2px 0; font-size: 13px; }
+
+/* Drag to reorder */
+.accounts.dragging { cursor: grabbing; user-select: none; }
+.accounts.dragging .acct:hover { background: transparent; }
+.acct.moving { opacity: .45; }
+.acct.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.acct.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }

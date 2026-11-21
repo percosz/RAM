@@ -100,21 +100,37 @@ pub fn vault_tick(state: State<'_, Shared>) -> Result<bool, String> {
 }
 
 /// Stores a cookie for an account, then starts a login check.
-#[tauri::command]
-pub fn cookie_set(app: AppHandle, state: State<'_, Shared>, id: AccountId, cookie: String) -> Result<(), String> {
-    let cookie = cookie.trim().to_string();
-    if cookie.len() < 32 {
-        return Err("That does not look like a .ROBLOSECURITY cookie.".into());
-    }
-    {
-        let mut s = lock(&state)?;
+/// Stores a pasted cookie for an existing account, after asking Roblox
+/// whose it is: a cookie that belongs to a different user is refused, so a
+/// wrong paste cannot attach someone else's session to this row.
+#[tauri::command(async)]
+pub fn cookie_set(app: AppHandle, state: State<'_, Shared>, id: AccountId, cookie: String) -> Result<String, String> {
+    use ram_core::cookies::{parse_line, PastedLine};
+    let value = match parse_line(&cookie) {
+        PastedLine::Cookie(c) => c,
+        _ => return Err("The clipboard does not hold a .ROBLOSECURITY cookie.".into()),
+    };
+    let (expected_id, expected_name) = {
+        let s = lock(&state)?;
         if !s.vault.is_unlocked() {
             return Err("Unlock the vault first.".into());
         }
-        s.vault.set_secret(id, &cookie, &crate::svc::WinEntropy, now()).map_err(|e| e.to_string())?;
+        let a = s.store.account(id).ok_or("account not found")?;
+        (a.roblox_user_id, a.username.clone())
+    };
+    let who = ram_core::roblox::whoami_full(&ram_win::WinHttp::new(), &value).map_err(|e| format!("Roblox did not accept that cookie ({e:?})."))?;
+    let same = expected_id == Some(who.user.id) || who.user.name.eq_ignore_ascii_case(&expected_name);
+    if !same {
+        return Err(format!("That cookie belongs to {}, not {expected_name}. Use Add to add it as its own account.", who.user.name));
+    }
+    {
+        let mut s = lock(&state)?;
+        let stored = who.rotated_cookie.as_deref().unwrap_or(&value);
+        s.vault.set_secret(id, stored, &crate::svc::WinEntropy, now()).map_err(|e| e.to_string())?;
+        s.log.info(&format!("account {id}: cookie pasted and confirmed"));
     }
     crate::cmd_launch::start_check(app, id);
-    Ok(())
+    Ok(who.user.name)
 }
 
 #[tauri::command]

@@ -4,6 +4,21 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.3.2 (2026-11-21)
+
+### Fixed
+- **Start-up took up to 30 seconds.** RAM probed every browser profile for a leftover DevTools port before showing its window, and Windows takes two seconds to refuse each dead port. The probe is now short, cleans up the leftover file, and runs after the window is up. Measured on a real data folder with seven stale profiles: 28.8 s before, 0.65 s after.
+
+### New
+- **Right-click an account** (or a selection): Join Server, Open Browser, Check sign-in, Copy (username, alias, user ID, profile link, cookie), Paste cookie, Set as Main, Favorite, Full quality, Move to group, Sort all by username, Remove cookie, Remove account.
+- **Drag accounts to reorder them.** Drag one row or a ticked selection; dropping into another group moves it there.
+- **Hide usernames** (Settings → Appearance, or the eye button in the toolbar): shows only the first three characters, for screenshots and streams.
+- A sign-in done in an account's browser window, or a cookie Roblox renews there, is saved to the vault by itself.
+
+### Changed
+- The details pane keeps Open Browser and Check; Reveal cookie, Capture session and Set cookie are gone (use right-click → Copy → Cookie, and Paste cookie). A pasted cookie is checked with Roblox and refused if it belongs to a different account.
+- The webview's own right-click menu (Back, Refresh, Print) no longer appears.
+
 ## 0.3.1 (2026-11-21)
 
 ### Fixed

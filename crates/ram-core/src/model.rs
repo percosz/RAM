@@ -508,6 +508,9 @@ pub struct Settings {
     /// Version whose release notes the user has already seen, so "What's
     /// new" shows once per update.
     pub seen_version: String,
+    /// Show only the first three characters of each username (for
+    /// screenshots and streams).
+    pub hide_usernames: bool,
     pub window: Option<Rect>,
     pub last_import_dir: String,
 }
@@ -525,6 +528,7 @@ impl Default for Settings {
             include_main_in_batch: false,
             check_updates: true,
             seen_version: String::new(),
+            hide_usernames: false,
             window: None,
             last_import_dir: String::new(),
         }

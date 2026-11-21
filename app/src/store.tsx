@@ -35,6 +35,8 @@ interface Ctx {
   dismissUpdate: () => void;
   crashCount: number;
   clearCrashCount: () => void;
+  /** A username as it should be shown: masked when Hide usernames is on. */
+  nameOf: (username: string) => string;
 }
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -68,6 +70,12 @@ function applyTheme(s: Settings) {
   }
   root.style.setProperty("--radius", `${Math.max(0, Math.min(16, s.corner_radius)) + 4}px`);
   root.style.setProperty("--radius-sm", `${Math.max(0, Math.min(16, s.corner_radius))}px`);
+}
+
+/** "Thornwick_Eli" → "Tho********" when hiding, like niccs' manager. */
+export function maskName(username: string, hide: boolean): string {
+  if (!hide || !username) return username;
+  return username.slice(0, 3) + "********";
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -178,11 +186,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { window.clearTimeout(t); window.clearInterval(every); };
   }, [snap, checkForUpdate]);
 
+  const hideNames = !!snap?.settings.hide_usernames;
+  const nameOf = useCallback((username: string) => maskName(username, hideNames), [hideNames]);
+
   const value = useMemo<Ctx>(() => ({
     snap, accounts: snap?.accounts ?? [], settings: snap?.settings ?? null, refresh, saveSettings, saveGraphics,
     selected, setSelected, toast, toasts, dismissToast, launchStatus,
-    update, checkForUpdate, installUpdate, dismissUpdate, crashCount, clearCrashCount,
-  }), [snap, refresh, saveSettings, saveGraphics, selected, toast, toasts, dismissToast, launchStatus, update, checkForUpdate, installUpdate, dismissUpdate, crashCount, clearCrashCount]);
+    update, checkForUpdate, installUpdate, dismissUpdate, crashCount, clearCrashCount, nameOf,
+  }), [nameOf, snap, refresh, saveSettings, saveGraphics, selected, toast, toasts, dismissToast, launchStatus, update, checkForUpdate, installUpdate, dismissUpdate, crashCount, clearCrashCount]);
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }

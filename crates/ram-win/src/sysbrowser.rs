@@ -29,6 +29,8 @@ const PORT_FILE: &str = "DevToolsActivePort";
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// A listening loopback port accepts within a few milliseconds.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 const POLL: Duration = Duration::from_millis(100);
 /// Upper bound on one CDP message; `Storage.getCookies` on a busy profile is
 /// well under a megabyte.
@@ -705,12 +707,23 @@ pub fn read_cookie(profile_dir: &Path) -> Result<Option<String>, String> {
 }
 
 /// Whether a browser is serving DevTools on `profile_dir` right now.
+///
+/// A port file whose port no longer answers is a leftover (the browser was
+/// killed, or the PC shut down with it open): it is deleted, so the next
+/// check is a plain "no file" and costs nothing. The probe uses a short
+/// timeout because Windows takes about two seconds to report a refused
+/// loopback connection, which once made RAM's start-up wait on every
+/// stale profile.
 pub fn is_running(profile_dir: &Path) -> bool {
     let Some((port, _)) = read_port_file(profile_dir) else {
         return false;
     };
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
-    TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).is_ok()
+    if TcpStream::connect_timeout(&addr, PROBE_TIMEOUT).is_ok() {
+        return true;
+    }
+    let _ = std::fs::remove_file(profile_dir.join("DevToolsActivePort"));
+    false
 }
 
 /// Asks the running browser on `profile_dir` to quit (`Browser.close`).

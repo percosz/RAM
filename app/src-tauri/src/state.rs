@@ -42,6 +42,7 @@ impl AppState {
     /// `%LOCALAPPDATA%\RAM`), unlocking a DPAPI vault and taking the
     /// multi-instance hold when enabled.
     pub fn init() -> AppState {
+        let started = std::time::Instant::now();
         let data_dir = std::env::var_os("RAM_DATA_DIR")
             .map(PathBuf::from)
             .or_else(|| ram_win::paths::local_app_data().map(|p| p.join("RAM")))
@@ -96,7 +97,11 @@ impl AppState {
         };
         state.apply_multi_instance();
         state.restore_client_settings();
-        crate::cmd_browser::sweep_profiles(&state.data_dir);
+        // Leftover browser-profile cookies are swept off the start-up path:
+        // probing each profile must never delay the window.
+        let dir = state.data_dir.clone();
+        std::thread::spawn(move || crate::cmd_browser::sweep_profiles(&dir));
+        state.log.debug(&format!("start-up: state ready in {} ms", started.elapsed().as_millis()));
         state
     }
 
