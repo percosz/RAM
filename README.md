@@ -3,17 +3,28 @@
 A fast, clean Windows account manager for Roblox, built for everyday Rogue
 Lineage use: switch between many accounts, join a place or follow a friend
 with one click, keep every session cookie in an encrypted vault, open your
-own browser already signed in as any account, run several clients at once
+own browser already signed in as any account, run several clients at once,
 and keep the alts light on your PC.
 
-RAM is a Rust rewrite of
-[Roblox Account Manager](https://github.com/ic3w0lf22/Roblox-Account-Manager)
-by ic3w0lf22, with a React front-end in a Tauri 2 shell. Its login check,
-performance model and crash history follow RoALT, its browser-profile idea
-follows niccs' RAM v4 and alyae, and its layout takes cues from both — see
-[NOTICE.md](NOTICE.md). It is not affiliated with Roblox.
+[![Latest release](https://img.shields.io/github/v/release/percosz/RAM?label=download&color=cba6f7)](https://github.com/percosz/RAM/releases/latest)
+[![Build](https://github.com/percosz/RAM/actions/workflows/release.yml/badge.svg)](https://github.com/percosz/RAM/actions/workflows/release.yml)
+[![Licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 
 ![Accounts](docs/screenshot-accounts.png)
+
+## Download
+
+Go to the [latest release](https://github.com/percosz/RAM/releases/latest):
+
+| File | Use it when |
+|---|---|
+| `RAM_<version>_x64-setup.exe` | You want it installed and kept up to date automatically. |
+| `RAM-<version>-x64-portable.zip` | You want a single `RAM.exe` in a folder of your choice. It does not update itself. |
+
+Windows 10 1809 or later with the WebView2 runtime (already part of Windows
+11 and current Windows 10). Windows SmartScreen may warn the first time
+because the installer is not code-signed with a paid certificate; the
+auto-updater verifies every update against RAM's own release signature.
 
 ## What it does
 
@@ -25,7 +36,9 @@ follows niccs' RAM v4 and alyae, and its layout takes cues from both — see
   the place's name) and optional **Job ID**, tick accounts, press **Join
   Server**. Or type a **username** and **Follow** them into their game.
   Several accounts launch one by one, spaced by a delay you set. Launching
-  uses a one-time Roblox authentication ticket from the stored cookie.
+  uses a one-time Roblox authentication ticket from the stored cookie, through
+  whatever handles `roblox-player:` links on your PC (Roblox itself, or
+  Bloxstrap, Froststrap, Fishstrap, Voidstrap).
 - **Open Browser.** Opens roblox.com in your default browser (Brave, Chrome,
   Edge, Vivaldi) already signed in as that account, each account in its own
   browser profile. With no cookie stored yet it shows the sign-in page: sign
@@ -46,9 +59,8 @@ follows niccs' RAM v4 and alyae, and its layout takes cues from both — see
   (MSAA, texture quality, rendering mode, gray sky, no grass, lowest render
   quality, paused lighting) plus your own FastFlags, written just before each
   alt client starts and put back once it has read them. Per-account FPS cap
-  and *Full quality*; the **Main** account is never touched. Works through
-  Bloxstrap-style launchers (Froststrap, Fishstrap, Voidstrap) as well as
-  Roblox's own.
+  and *Full quality*; the **Main** account is never touched. Presets: Max
+  alts, Balanced, Roblox defaults.
 - **Diagnostics.** A crash history that says how each client ended
   (disconnected, crashed, replaced, sign-in refused) with the reason from its
   log, and RAM's own log with level filters and a redacted "Copy diagnostics".
@@ -63,13 +75,18 @@ follows niccs' RAM v4 and alyae, and its layout takes cues from both — see
   the sidebar; it installs only when you click, and the installer must carry
   RAM's release signature. "What's new" shows once after an update.
 
+<details>
+<summary>More screenshots</summary>
+
+![Settings](docs/screenshot-settings.png)
+
 ![Diagnostics](docs/screenshot-diagnostics.png)
+
+</details>
 
 ## Getting started
 
-1. Run the installer from the latest release (or unzip the portable build).
-   Windows 10 1809+ with the WebView2 runtime, which Windows 11 and current
-   Windows 10 already have.
+1. Install RAM (or unzip the portable build) and run it.
 2. **Settings → Security → Set up vault** (Windows account or master password).
 3. **Add** an account, then **Open Browser**, sign in, and **Capture session**.
    Or paste a cookie with **Set cookie…**. Or **Import** from Roblox Account
@@ -91,20 +108,26 @@ follows niccs' RAM v4 and alyae, and its layout takes cues from both — see
 | Delete | Remove the selected accounts |
 | Esc | Close a dialog |
 
-## Security notes
+## Privacy and security
 
-A stored session cookie is as powerful as a password. RAM encrypts cookies at
-rest and gates reveal/copy behind Windows Hello or the master password, but it
-cannot protect against malware already running as your Windows user. Use the
-master-password vault on shared machines, keep the recovery code offline, and
-remove cookies you no longer need.
-
-Open Browser drives the browser through Chrome's DevTools protocol on a
-loopback port that only exists while that window is open; any program running
-as you could talk to that window during that time. Close it when you are done.
-Running several clients at once is not officially supported by Roblox; the
-performance settings use the same files Roblox and Bloxstrap use (Roblox's own
-settings XML and `ClientAppSettings.json`) and are restored after each launch.
+- RAM talks only to Roblox (login check, tickets, headshots, place names)
+  and, for update checks, to GitHub. There is no telemetry.
+- Everything stays in `%LOCALAPPDATA%\RAM`: `store.json` (accounts, settings,
+  crash history), `vault.bin` (encrypted cookies), `browser-profiles\` and
+  `RAM.log`. Cookies never reach the log or the plain data file.
+- A stored session cookie is as powerful as a password. RAM encrypts cookies at
+  rest and gates reveal/copy behind Windows Hello or the master password, but
+  it cannot protect against malware already running as your Windows user. Use
+  the master-password vault on shared machines and keep the recovery code
+  offline.
+- Open Browser drives the browser through Chrome's DevTools protocol on a
+  loopback port that only exists while that window is open; any program
+  running as you could talk to that window during that time. Close it when
+  you are done.
+- Running several clients at once is not officially supported by Roblox. The
+  performance settings use the same files Roblox and Bloxstrap use (Roblox's
+  own settings XML and `ClientAppSettings.json`) and are restored after each
+  launch.
 
 ## Building
 
@@ -114,14 +137,25 @@ See [docs/BUILD.md](docs/BUILD.md). In short:
 .\scripts\package.ps1
 ```
 
+Releases are built and signed by [the Release workflow](.github/workflows/release.yml)
+when a version tag is pushed.
+
 ## Documentation
 
 - [Changelog](CHANGELOG.md) · [Design decisions](docs/DECISIONS.md) · [Reference code study](docs/REFERENCE_CODE_STUDY.md)
 - [Migration notes](docs/MIGRATION.md) · [Support matrix](docs/SUPPORT_MATRIX.md) · [Benchmarks](docs/BENCHMARKS.md)
 - [Legacy source audit](docs/LEGACY_AUDIT.md) · [Research notes](docs/RESEARCH_NOTES.md)
 
-## Licence
+## Credits and licence
 
-GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). Roblox
-and Rogue Lineage are trademarks of their owners; RAM is unaffiliated and does
-not modify the Roblox client.
+RAM is a Rust rewrite of
+[Roblox Account Manager](https://github.com/ic3w0lf22/Roblox-Account-Manager)
+by ic3w0lf22, with a React front-end in a Tauri 2 shell. Its login check,
+performance model and crash history follow [RoALT](https://github.com/inspectsoftware/RoALT),
+its browser-profile idea follows [niccs' RAM v4](https://github.com/niccsprojects/Roblox-Account-Manager)
+and [alyae](https://github.com/vysaely/alyae), and its layout takes cues from
+both. See [NOTICE.md](NOTICE.md) for what was taken from where.
+
+GPL-3.0-or-later. See [LICENSE](LICENSE). Roblox and Rogue Lineage are
+trademarks of their owners; RAM is not affiliated with either and does not
+modify the Roblox client.
