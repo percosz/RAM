@@ -63,11 +63,14 @@ jobs:
           echo "version=$conf" >> "$GITHUB_OUTPUT"
 
       - name: Release notes from CHANGELOG.md
+        id: notes
         shell: bash
         run: |
           awk -v v="${{ steps.v.outputs.version }}" '/^## /{p = ($2 == v); next} p' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "- See the commit history." > notes.md; fi
+          printf '\n---\n`RAM_%s_x64-setup.exe` installs and keeps itself up to date (signed updates). The portable zip is a bare `RAM.exe` that does not self-update.\n' "${{ steps.v.outputs.version }}" >> notes.md
           cat notes.md
+          { echo 'body<<NOTES_EOF'; cat notes.md; echo 'NOTES_EOF'; } >> "$GITHUB_OUTPUT"
 
       - name: Build and publish the installer, signature and latest.json
         uses: tauri-apps/tauri-action@v0
@@ -79,8 +82,7 @@ jobs:
           projectPath: app
           tagName: v${{ steps.v.outputs.version }}
           releaseName: RAM ${{ steps.v.outputs.version }}
-          releaseBody: ""
-          releaseBodyFile: notes.md
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
