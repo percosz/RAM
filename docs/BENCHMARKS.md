@@ -1,5 +1,22 @@
 # Benchmarks
 
+> **Update (cookie-vault build).** The headline numbers below were first taken
+> for the pre-vault build. For the current `RAM 0.1.0` with the encrypted
+> vault, direct launch and multi-instance, measured on the same PC:
+>
+> | Metric | Value |
+> |---|---|
+> | Package (zip) | 0.57 MB (581,522 bytes) |
+> | `RAM.exe` | 0.94 MB (986,624 bytes) |
+> | Startup to first frame | 176-256 ms, median 205 ms (7 runs) |
+> | Idle CPU | 0.00% of one core over 30 s |
+> | Working set (idle) | 17.7 MB, 6 threads, one process |
+> | Reproducible | Two clean builds in different directories produced identical exe and zip SHA-256 |
+>
+> The size and startup grew modestly (crypto crates, the embedded icon, and
+> creating the multi-instance object at startup). The table below gives the
+> fuller pre-vault measurements and the method, which is unchanged.
+
 Measured on 2026-11-20 against the packaged release
 (`RAM-0.1.0-x64.zip`, built by `scripts\package.ps1`).
 
