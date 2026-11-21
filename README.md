@@ -34,9 +34,21 @@ auto-updater verifies every update against RAM's own release signature.
 - **Accounts.** A searchable, groupable list with Roblox headshots, the
   username first and your alias and description underneath, a Valid/Invalid
   badge, Robux and Premium. Tick boxes on rows and group headers pick any set
-  of accounts; the details pane edits alias, group and description. Drag rows
-  to reorder, right-click for actions, and hide usernames with one click for
-  screenshots.
+  of accounts; the details pane edits alias, group and description, marks
+  Main and favourites, and shows how the account was added (cookie only,
+  browser sign-in, or login + password). Drag rows to reorder, and hide
+  usernames with one click for screenshots.
+- **Add accounts your way.** Sign in with Roblox in your own browser, paste a
+  cookie, or paste a list. Cookies in the list are added at once;
+  `username:password` lines go into a queue: RAM opens Roblox's own sign-in
+  page in your browser for one account at a time, types the login and
+  presses Sign in, you solve any check, and RAM saves the session and moves
+  on. Skip and Stop control the queue. Passwords can be kept in the vault
+  (encrypted) and copied later.
+- **Right-click menu.** For one account or the ticked selection: Join Server,
+  Open Browser, Check sign-in, Copy (username, alias, user ID, profile link,
+  cookie, password, `username:password`), Paste cookie, Set as Main,
+  Favorite, Full quality, Move to group, Sort, Remove.
 - **Launch.** Type a **Place ID** (Rogue Lineage is pre-filled; the bar shows
   the place's name) and optional **Job ID**, tick accounts, press **Join
   Server**. Or type a **username** and **Follow** them into their game.
@@ -44,55 +56,63 @@ auto-updater verifies every update against RAM's own release signature.
   uses a one-time Roblox authentication ticket from the stored cookie, through
   whatever handles `roblox-player:` links on your PC (Roblox itself, or
   Bloxstrap, Froststrap, Fishstrap, Voidstrap).
-- **Open Browser.** Opens roblox.com in your default browser (Brave, Chrome,
+- **Open Browser.** Opens roblox.com in your own browser (Brave, Chrome,
   Edge, Vivaldi) already signed in as that account, each account in its own
-  browser profile. With no cookie stored yet it shows the sign-in page: sign
-  in there and RAM saves the session by itself. The profile's cookies are
-  wiped when the window closes; the vault stays the only store.
+  browser profile. RAM follows the Windows default browser, or you pin one
+  in Settings. With no cookie stored yet it shows the sign-in page: sign in
+  there and RAM saves the session by itself, as it does when Roblox renews
+  the cookie. The profile's cookies are wiped when the window closes; the
+  vault stays the only store.
 - **Login check.** The RoALT method: `users.roblox.com/v1/users/authenticated`
   with the cookie. 401 means invalid; a "bound session" or verification
   challenge is reported as such; rate limits and network errors never change
   what you last knew. Rotated cookies are saved automatically.
-- **Vault.** Cookies are encrypted at rest with Windows data protection
-  (DPAPI) or a master password (Argon2id + AES‑256‑GCM) with auto-lock and a
-  one-time recovery code. Revealing a cookie asks for Windows Hello or the
-  master password.
+- **Vault.** Cookies and saved passwords are encrypted at rest with Windows
+  data protection (DPAPI) or a master password (Argon2id + AES‑256‑GCM) with
+  auto-lock and a one-time recovery code. Copying a cookie or a password
+  asks for Windows Hello or the master password.
 - **Multi-instance.** On by default: RAM holds Roblox's single-instance lock
   so more than one client can run. It owns a named Windows object only; it
   does not modify or inject into the client.
-- **Add accounts your way.** Sign in with Roblox in your own browser, paste a
-  cookie, or paste a list: cookies are added at once and `username:password`
-  lines are signed in one at a time through Roblox's own sign-in page, filled
-  in for you. Passwords can be kept in the vault (encrypted) and copied later.
 - **Performance for alts.** An FPS cap, lowest graphics and lighter rendering
   (MSAA, texture quality, rendering mode, gray sky, no grass, lowest render
   quality, paused lighting) plus your own FastFlags, written just before each
   alt client starts and put back once it has read them. Per-account FPS cap
   and *Full quality*; the **Main** account is never touched. Presets: Roblox
-  defaults (the starting point), Balanced, Max alts. Volume 0 is an option.
+  defaults (the starting point, nothing is written), Balanced, Max alts.
+  Volume 0 is an option.
 - **Running clients.** Minimize on launch, tiny windows, mute, a background
-  CPU limit, efficiency mode, memory trim and a bandwidth limit, for alts
-  only; Minimize all / Restore all with one click.
+  CPU limit, efficiency mode and memory trim for alt clients, all off until
+  you turn them on and never applied to Main or Full quality accounts. A
+  bandwidth limit is also there; it is a Windows network policy, so it asks
+  for administrator approval and applies to every Roblox client on the PC.
+- **Clients.** Every Roblox client that is open, with its account and memory
+  use; close one, or Minimize all / Restore all with one click.
 - **Diagnostics.** A crash history that says how each client ended
   (disconnected, crashed, replaced, sign-in refused) with the reason from its
-  log, and RAM's own log with level filters and a redacted "Copy diagnostics".
-- **Import / export.** RAM finds Roblox Account Manager's `AccountData.json`
-  (or its backup) on your PC, unlocks it if it has a password, shows a
-  preview, and moves its cookies and saved passwords into the vault; export
-  back out with or without cookies.
+  log, CSV export and a link to the log. A client you close yourself is not
+  recorded, including one ended with End task. RAM's own log has level
+  filters and a redacted "Copy diagnostics".
+- **Import / export.** RAM searches your PC for Roblox Account Manager's
+  `AccountData.json` and its backups (`.backup`, `.bak`, `.old`), unlocks the
+  file if it has a password, shows a preview, and moves its cookies and saved
+  passwords into the vault; export back out with or without cookies.
 - **Themes and rows.** System, Light, Dark, Catppuccin (Mocha, Macchiato,
   Frappé, Latte), Nord, Dracula, Gruvbox, Rosé Pine and a muted Lineage
   palette, an accent colour, corner radius, and four row sizes from Compact
   (one line) to Large.
-- **Tutorial.** A one-minute tour on first launch shows where everything is;
-  repeat it from the bottom of Settings.
-- **Updates.** RAM checks GitHub Releases, announces a new version when it
-  starts, and keeps the offer in the sidebar; it installs only when you
-  click, and the installer must carry RAM's release signature. "What's new"
-  shows once after an update.
+- **Tutorial.** A one-minute tour on first launch points at each part of the
+  app in turn; skip it at any step and repeat it from the bottom of Settings.
+- **Updates.** RAM checks GitHub Releases when it starts and every 6 hours.
+  A new version is announced in a dialog with its release notes and two
+  choices, **Update now** or **Later**; Later keeps the offer in the sidebar.
+  Nothing installs without your click, and the installer must carry RAM's
+  release signature. "What's new" shows once after an update.
 
 <details>
 <summary>More screenshots</summary>
+
+![Tutorial](docs/screenshot-tutorial.png)
 
 ![Settings](docs/screenshot-settings.png)
 
@@ -102,22 +122,24 @@ auto-updater verifies every update against RAM's own release signature.
 
 ## Getting started
 
-1. Install RAM (or unzip the portable build) and run it.
+1. Install RAM (or unzip the portable build) and run it. The tutorial shows
+   you around the first time; skip it if you like.
 2. **Settings → Security → Set up vault** (Windows account or master password).
 3. **Add** an account: **Sign in with Roblox** (your browser opens, RAM saves
-   the session), paste a cookie, or paste many at once. Or **Import** from
-   Roblox Account Manager with the cookie switch on.
-4. Mark your own account as **Main** (details pane), then turn on
-   **Settings → Performance** if you want light alts.
+   the session), paste a cookie, or paste a list of cookies or
+   `username:password` lines. Or **Import** from Roblox Account Manager with
+   the cookie switch on.
+4. Mark your own account as **Main** (details pane or right-click), then pick
+   a preset in **Settings → Performance** if you want light alts.
 5. Tick accounts, keep the Place ID (Rogue Lineage) or type another, press
    **Join Server**.
 
-## Keyboard
+## Keyboard and mouse
 
 | Keys | Action |
 |---|---|
 | Tick box | Add or remove one account from the selection |
-| Right-click | Actions for that account or the selection: copy, paste cookie, groups, Main, remove |
+| Right-click | Actions for that account or the selection: join, open browser, copy (cookie, password and more), paste cookie, groups, Main, remove |
 | Drag a row | Reorder accounts; drop into another group to move it there |
 | Click / Ctrl+click / Shift+click | Select / toggle / range-select accounts |
 | Ctrl+A | Select all (Main excluded) |
@@ -125,22 +147,23 @@ auto-updater verifies every update against RAM's own release signature.
 | Double-click | Join Server with that account |
 | Delete | Remove the selected accounts |
 | Esc | Close a dialog |
+| ← / → , Enter, Esc | In the tutorial: back / next, next, skip |
 
 ## Privacy and security
 
 - RAM talks only to Roblox (login check, tickets, headshots, place names)
   and, for update checks, to GitHub. There is no telemetry.
 - Everything stays in `%LOCALAPPDATA%\RAM`: `store.json` (accounts, settings,
-  crash history), `vault.bin` (encrypted cookies), `browser-profiles\` and
-  `RAM.log`. Cookies never reach the log or the plain data file.
+  crash history), `vault.bin` (encrypted cookies and saved passwords),
+  `browser-profiles\` and `RAM.log`. Cookies and passwords never reach the
+  log or the plain data file.
 - A stored session cookie is as powerful as a password. RAM encrypts cookies
   (and any passwords you choose to save) at rest and gates copying them behind
   Windows Hello or the master password, but it cannot protect against malware
   already running as your Windows user. Passwords are only ever typed into
   Roblox's own sign-in page in your browser; turn "Save passwords" off and
-  they are forgotten as soon as the form is filled. Use
-  the master-password vault on shared machines and keep the recovery code
-  offline.
+  they are forgotten as soon as the form is filled. Use the master-password
+  vault on shared machines and keep the recovery code offline.
 - Open Browser drives the browser through Chrome's DevTools protocol on a
   loopback port that only exists while that window is open; any program
   running as you could talk to that window during that time. Close it when
@@ -149,6 +172,10 @@ auto-updater verifies every update against RAM's own release signature.
   performance settings use the same files Roblox and Bloxstrap use (Roblox's
   own settings XML and `ClientAppSettings.json`) and are restored after each
   launch.
+- The limits for running clients only minimize, resize, mute or slow down
+  client processes from the outside. The bandwidth limit is the one setting
+  that changes Windows itself (a network policy named `RAM-Roblox`); remove
+  it in Settings, or it goes away when the PC restarts.
 
 ## Building
 
