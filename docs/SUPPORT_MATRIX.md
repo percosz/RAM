@@ -42,7 +42,7 @@ handler, which is what the "on this PC" notes refer to.
 | Auto-lock after inactivity; manual lock | Verified | No | Unit tests on the clock rules; the UI polls every 20 s. |
 | One-time recovery code | Verified | No | Unit tests. The code is shown once at setup and is not stored in clear. |
 | Change master password; remove the vault | Verified | No | Unit tests. Removing the vault deletes every stored cookie. |
-| Reveal/copy a cookie behind Windows Hello | Conditional | No | Hello availability is detected; a Verified/Canceled round trip was not driven on the dev PC. When Hello is not available, the master password is asked instead (DPAPI vaults without Hello: reveal is refused). |
+| Reveal/copy a cookie behind Windows Hello | Conditional | No | The prompt is attached to RAM's window through `IUserConsentVerifierInterop` and runs on a worker thread (v0.3.0 showed it from the UI thread, which froze the app). A Verified/Canceled round trip was not driven on the dev PC. When Hello is not available, the master password is asked instead; a DPAPI vault without Hello reveals after the Windows sign-in alone. |
 | Cookies never in `store.json`, the log, or error messages | Verified | No | Redaction unit tests assert on distinctive values; the browser module maps cookie errors to fixed strings. |
 
 ## Sign-in and the login check

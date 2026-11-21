@@ -60,6 +60,11 @@ fn create(mutex: PCWSTR, event: PCWSTR) -> PlatformResult<SingletonHold> {
 
     let event_handle = match unsafe { CreateEventW(None, true, false, event) } {
         Ok(handle) => handle,
+        // ERROR_INVALID_HANDLE: another program (a bootstrapper's own
+        // multi-instance feature, say) created an object of a different
+        // kind under the event's name. The mutex is what the client checks;
+        // keep it and go on without the event.
+        Err(e) if e.code() == windows::Win32::Foundation::ERROR_INVALID_HANDLE.to_hresult() => HANDLE::default(),
         Err(e) => {
             // Don't leak the mutex we just created.
             unsafe {
@@ -83,7 +88,9 @@ impl Drop for SingletonHold {
             // Releasing a mutex this process doesn't own fails harmlessly.
             let _ = ReleaseMutex(self.mutex);
             let _ = CloseHandle(self.mutex);
-            let _ = CloseHandle(self.event);
+            if !self.event.is_invalid() && self.event != HANDLE::default() {
+                let _ = CloseHandle(self.event);
+            }
         }
     }
 }

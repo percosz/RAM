@@ -146,7 +146,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Headshots: public API, refreshed when missing or a day old.
     api.refreshAvatars().catch(() => {});
     const unsubs: Array<() => void> = [];
-    api.onAccountUpdated(() => { void refresh(); }).then((u) => unsubs.push(u));
+    // A batch check fires one event per account; take one snapshot for the burst.
+    let pending: number | null = null;
+    api.onAccountUpdated(() => {
+      if (pending != null) return;
+      pending = window.setTimeout(() => { pending = null; void refresh(); }, 120);
+    }).then((u) => unsubs.push(u));
     api.onLaunchStatus((e) => {
       setLaunchStatus((m) => ({ ...m, [e.account]: { state: e.state, message: e.message } }));
       if (e.state === "Failed") toast(e.message, "bad");

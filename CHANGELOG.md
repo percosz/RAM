@@ -4,6 +4,13 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.3.1 (2026-11-21)
+
+### Fixed
+- **Reveal cookie froze RAM.** The Windows Hello prompt was shown from the UI thread, which it needs for its own message loop; it now runs on a worker thread and is attached to RAM's window the way desktop apps must.
+- Multi-instance no longer gives up when another program holds `ROBLOX_singletonEvent` as a different kind of object (Bloxstrap-style launchers); the mutex, which is what the client checks, is still held.
+- Faster start and lighter checks: the Windows Hello availability query is cached, a batch check takes one snapshot instead of one per account, and the window opens dark instead of flashing white.
+
 ## 0.3.0 (2026-11-21)
 
 ### New

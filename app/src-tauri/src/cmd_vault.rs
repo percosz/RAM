@@ -7,7 +7,7 @@ use crate::state::{now, Shared};
 use crate::svc;
 use ram_core::model::AccountId;
 use ram_core::vault::VaultMode;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 fn lock<'a>(state: &'a State<'_, Shared>) -> Result<std::sync::MutexGuard<'a, crate::state::AppState>, String> {
     state.lock().map_err(|_| "application state is unavailable".to_string())
@@ -124,8 +124,11 @@ pub fn cookie_remove(state: State<'_, Shared>, id: AccountId) -> Result<(), Stri
 }
 
 /// Returns the raw cookie after a Windows Hello or password confirmation.
-#[tauri::command]
-pub fn cookie_reveal(state: State<'_, Shared>, id: AccountId, password: Option<String>) -> Result<String, String> {
+///
+/// Runs off the UI thread (`async`): the Hello prompt is modal and needs the
+/// main window's message loop, so blocking the UI thread on it froze the app.
+#[tauri::command(async)]
+pub fn cookie_reveal(app: AppHandle, state: State<'_, Shared>, id: AccountId, password: Option<String>) -> Result<String, String> {
     // Gate first, holding no lock while the Hello prompt is up.
     let (require_hello, master) = {
         let s = lock(&state)?;
@@ -136,10 +139,15 @@ pub fn cookie_reveal(state: State<'_, Shared>, id: AccountId, password: Option<S
     };
     let mut gated = false;
     if require_hello && ram_win::hello::is_available() {
-        match svc::hello_confirm("Confirm to reveal a Roblox session cookie") {
+        let hwnd = app.get_webview_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize).unwrap_or(0);
+        match svc::hello_confirm(hwnd, "Confirm to reveal a Roblox session cookie") {
             Ok(true) => gated = true,
             Ok(false) => return Err("Cancelled.".into()),
-            Err(_) => {}
+            Err(e) => {
+                if let Ok(s) = lock(&state) {
+                    s.log.warn(&format!("Windows Hello prompt failed, falling back: {e}"));
+                }
+            }
         }
     }
     let mut s = lock(&state)?;

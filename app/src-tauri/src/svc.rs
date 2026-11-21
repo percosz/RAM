@@ -39,10 +39,12 @@ impl ram_core::import::LegacyDecryptor for LegacyDpapi {
     }
 }
 
-/// Windows Hello confirmation; `Ok(true)` only on a positive result.
-pub fn hello_confirm(message: &str) -> Result<bool, String> {
+/// Windows Hello confirmation attached to the main window; `Ok(true)` only
+/// on a positive result. Blocks: call from a worker thread, never the UI
+/// thread (the prompt needs the window's message loop).
+pub fn hello_confirm(hwnd: isize, message: &str) -> Result<bool, String> {
     if !ram_win::hello::is_available() {
         return Err("Windows Hello is not set up on this PC".to_string());
     }
-    ram_win::hello::verify(message).map_err(|e| e.to_string())
+    ram_win::hello::verify_for_window(hwnd, message).map_err(|e| e.to_string())
 }
