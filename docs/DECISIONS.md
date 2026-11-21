@@ -18,17 +18,53 @@ claims about Roblox, browsers and Windows is in
 Because the two revisions differ by one line in a removed feature, 3.7.2 is
 the migration target: the importer reads what 3.7.2 writes.
 
-## The central change: no credentials in the manager
+## Update: the cookie vault and direct launch
+
+An earlier revision of this document described a design that stored **no**
+credentials and launched only through the browser. That is no longer the
+default. RAM now keeps the original program's model — storing each account's
+session cookie and launching the client directly with an authentication
+ticket — but does so securely:
+
+- Cookies live in an **encrypted vault** (`vault.bin`), never in the plain
+  data file or the log. The vault is protected with Windows data protection
+  (DPAPI) or a master password (Argon2id + AES-256-GCM) with auto-lock and a
+  one-time recovery code. Revealing or copying a raw cookie is gated behind
+  Windows Hello or the master password. See `crates/ram-core/src/vault.rs`.
+- **Direct launch** (`ram-core/src/roblox.rs`) exchanges a stored cookie for
+  a one-time Roblox authentication ticket and starts the client, falling back
+  to the browser when no cookie is stored or the cookie has expired.
+- **Multi-instance is on by default** (`ram-win/src/multi_instance.rs`): RAM
+  holds Roblox's singleton object so several clients can run. It owns a named
+  kernel object only — it does not modify or inject into the client. Roblox
+  does not officially support this; the support matrix states the caveat.
+- Sign-in status can now reach **Verified** from a cookie check
+  (`users.roblox.com/v1/users/authenticated`) as well as from OAuth.
+
+The security trade-off is explicit: a stored session cookie is as powerful as
+a password, so the vault, the Hello/password gate and the master-password mode
+exist to protect it at rest. The rest of this document — the browser hand-off,
+the honest-status rules, the removed remote-control and self-update features,
+the performance tools — still holds. The browser hand-off remains available
+and is the path for accounts without a stored cookie.
+
+## The original no-credentials design (superseded)
+
+The sections below describe the stricter no-credentials approach the rewrite
+started from. It remains an accurate description of the browser hand-off path,
+which is still present; where it says RAM stores no cookies, read "unless you
+set up the vault and store one".
 
 The legacy app stores each account's `.ROBLOSECURITY` cookie and password,
 requests authentication tickets with them, and starts the client itself.
 Everything else follows from that: the embedded browser, cookie refresh, the
 local web API that can return cookies, the encryption modes.
 
-Waypoint stores account names and notes only. Roblox handles the password,
+RAM stores account names and notes, and — when you opt in — encrypted
+cookies. For accounts without a stored cookie, Roblox handles the password,
 two-step verification and CAPTCHA in the user's own browser, and the browser
-starts the client. The cost is that the manager cannot see a browser session,
-so it says what it knows and what it does not:
+starts the client. In that case the manager cannot see a browser session, so
+it says what it knows and what it does not:
 
 - **Sign-in status** is `Verified` only when Roblox confirms the identity
   through its documented OAuth 2.0 flow, `Signed out` only when Roblox
@@ -53,7 +89,7 @@ so it says what it knows and what it does not:
 | Saved place, job ID, private server per account | **Rewrite** | Now named destinations with a durability label: saved, saved link, or live server that may have expired. |
 | Recent and favorite games | **Keep**, rewritten | Rogue Lineage is a built-in pinned game; other games stay usable. |
 | Follow user, server browser, shuffle to random server, region lookup, player finder | **Remove** (first release) | Need the cookie, or send data to third parties (`ip-api.com`). A public-server picker could return later through the unauthenticated endpoint. |
-| Multi-Roblox (holding `ROBLOX_singletonMutex`) | **Remove** | Not a supported interface; Roblox states that running several clients is not officially supported. Waypoint does not defeat the single-instance check. Tracking, presets and tiling work with however many clients Roblox itself allows. |
+| Multi-Roblox (holding `ROBLOX_singletonMutex`) | **Remove** | Not a supported interface; Roblox states that running several clients is not officially supported. RAM does not defeat the single-instance check. Tracking, presets and tiling work with however many clients Roblox itself allows. |
 | Process tracking through `-b <browserTrackerId>` on the command line (WMI) | **Rewrite** | The value was injected by the legacy launcher and no longer exists. Tracking now uses process snapshots, exit waits and a window-show hook, with evidence-based account links. |
 | Bundled Sysinternals `handle.exe`, log-file tailing with remotely downloaded patterns | **Remove** | Redistribution and trust concerns; closes handles inside the client in some forks. |
 | Roblox cookie-file lock (`RobloxCookies.dat` held open) | **Remove** | Deliberately breaks the client's own file. |
@@ -62,7 +98,7 @@ so it says what it knows and what it does not:
 | Local HTTP API (`WebServer`), `RAMAccount.lua` | **Remove** | Exposes account actions and, in one code path, cookies to local callers. |
 | Developer mode switches, credential-bearing "quick login" and share links | **Remove** | Credential exposure. |
 | Account utilities (password, email, PIN, sessions, block, avatar, purchases) | **Remove** | Act as the user with the cookie; done on roblox.com instead. |
-| Auto-updater, silent VC++ install, config self-repair | **Remove** | Unverified downloads run with elevation. Waypoint has no updater and makes no network request except optional OAuth checks. |
+| Auto-updater, silent VC++ install, config self-repair | **Remove** | Unverified downloads run with elevation. RAM has no updater and makes no network request except optional OAuth checks. |
 | Captcha solver, stealth plugin, proxies, script injection | **Remove** | Circumvent Roblox's verification. |
 | Window position save/restore | **Rewrite** | Optional tiling of identified clients, with a one-click reset. |
 | Themes (`RAMTheme.ini`) | **Rewrite** | System, Light, Dark and Lineage palettes, custom accent, compact density; high-contrast mode respected. Legacy theme files are not imported. |

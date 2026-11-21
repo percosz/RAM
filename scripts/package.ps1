@@ -3,8 +3,8 @@
   Builds the release binary and a reproducible zip package.
 
 .DESCRIPTION
-  Runs the tests, builds waypoint.exe with the pinned toolchain and locked
-  dependencies, and writes dist\Waypoint-<version>-x64.zip plus its SHA-256.
+  Runs the tests, builds RAM.exe with the pinned toolchain and locked
+  dependencies, and writes dist\RAM-<version>-x64.zip plus its SHA-256.
 
   The zip is reproducible: entries are stored in a fixed order with a fixed
   timestamp, and the build remaps local paths, so two builds of the same
@@ -32,21 +32,24 @@ $env:CARGO_TARGET_DIR = $TargetDir
 # deterministic (/Brepro replaces the PE timestamp with a content hash).
 $env:RUSTFLAGS = "--remap-path-prefix=$root=. --remap-path-prefix=$TargetDir=target --remap-path-prefix=$($env:USERPROFILE)=~ -C link-arg=/Brepro"
 
+# Cargo writes progress (and its "Finished" line) to stderr, which the Stop
+# preference would treat as a terminating error; run these with Continue and
+# rely on the exit code instead.
 if (-not $SkipTests) {
-    cargo test --workspace --locked
+    & { $ErrorActionPreference = 'Continue'; cargo test --workspace --locked }
     if ($LASTEXITCODE -ne 0) { throw "tests failed" }
 }
-cargo build --release --locked -p ram-app
+& { $ErrorActionPreference = 'Continue'; cargo build --release --locked -p ram-app }
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
 $version = (Select-String -Path (Join-Path $root "Cargo.toml") -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-$name = "Waypoint-$version-x64"
+$name = "RAM-$version-x64"
 $dist = Join-Path $root "dist"
 $stage = Join-Path $dist $name
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage, (Join-Path $stage "docs") | Out-Null
 
-Copy-Item (Join-Path $TargetDir "release\waypoint.exe") $stage
+Copy-Item (Join-Path $TargetDir "release\RAM.exe") $stage
 Copy-Item (Join-Path $root "LICENSE"), (Join-Path $root "NOTICE.md"), (Join-Path $root "README.md") $stage
 Copy-Item (Join-Path $root "docs\*.md") (Join-Path $stage "docs")
 
@@ -73,14 +76,14 @@ try {
     $stream.Dispose()
 }
 
-$exeHash = (Get-FileHash (Join-Path $stage "waypoint.exe") -Algorithm SHA256).Hash.ToLower()
+$exeHash = (Get-FileHash (Join-Path $stage "RAM.exe") -Algorithm SHA256).Hash.ToLower()
 $zipHash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
 "$zipHash  $name.zip" | Set-Content -Encoding ascii (Join-Path $dist "$name.zip.sha256")
 
 [pscustomobject]@{
     Package   = $zip
     ZipBytes  = (Get-Item $zip).Length
-    ExeBytes  = (Get-Item (Join-Path $stage "waypoint.exe")).Length
+    ExeBytes  = (Get-Item (Join-Path $stage "RAM.exe")).Length
     ExeSha256 = $exeHash
     ZipSha256 = $zipHash
     Rustc     = (rustc -V)

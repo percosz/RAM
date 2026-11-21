@@ -21,7 +21,7 @@
   only. Use scripts\bench-clients.ps1 for client resource use and frame times.
 
 .EXAMPLE
-  .\scripts\bench.ps1 -Exe dist\Waypoint-0.1.0-x64\waypoint.exe -Arguments '--data-dir','C:\tmp\wp-bench','--seed-demo','100' -PackagePath dist\Waypoint-0.1.0-x64.zip
+  .\scripts\bench.ps1 -Exe dist\RAM-0.1.0-x64\RAM.exe -Arguments '--data-dir','C:\tmp\wp-bench','--seed-demo','100' -PackagePath dist\RAM-0.1.0-x64.zip
 
 .EXAMPLE
   .\scripts\bench.ps1 -Exe 'C:\RAM\Roblox Account Manager.exe' -PackagePath 'C:\RAM' -Label legacy-3.7.2

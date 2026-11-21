@@ -1,144 +1,126 @@
-# Waypoint
+# RAM
 
-A Windows account manager for Roblox, built for everyday Rogue Lineage use:
-fast account switching, saved server destinations, honest sign-in status,
-and optional controls that keep background clients from slowing down the
-account you are playing on.
+A fast, good-looking Windows account manager for Roblox, built for everyday
+Rogue Lineage use: quick switching between many accounts, saved server
+destinations, honest sign-in status, an encrypted cookie vault, optional
+multi-client launching, and reversible controls that keep background clients
+from slowing down the account you are playing on.
 
-Waypoint is a Rust rewrite of
+RAM is a Rust rewrite of
 [Roblox Account Manager](https://github.com/ic3w0lf22/Roblox-Account-Manager)
 by ic3w0lf22 (see [NOTICE.md](NOTICE.md)). It is not affiliated with Roblox.
 
-## How it differs from the original
+![RAM](crates/ram-app/assets/RAM-256.png)
 
-- **No passwords or cookies.** You sign in on roblox.com in your own
-  browser. Roblox handles the password, two-step verification and CAPTCHA.
-  Waypoint stores account names, notes and destinations.
-- **The browser launches the game.** Each account can be tied to a named
-  browser profile (Chrome, Edge, Brave, Vivaldi, Firefox). Launching opens
-  the join link in that profile, and the browser starts Roblox.
-- **Status you can trust.** Sign-in status and client status are separate,
-  and each says only what was actually observed. A network problem never
-  shows up as "Signed out".
-- **Small and quiet.** One executable, no embedded browser, no background
-  service, no administrator rights, no telemetry, no updater.
+## Highlights
+
+- **Encrypted cookie vault.** Session cookies are encrypted at rest with
+  Windows data protection (DPAPI) or a master password (Argon2id +
+  AES-256-GCM) with auto-lock and a one-time recovery code. Revealing or
+  copying a cookie is gated behind Windows Hello or the master password.
+- **One-click launching.** With a stored cookie, RAM starts the client
+  directly through a Roblox authentication ticket — no browser step. Without
+  one, it hands off to your browser. Several clients can run at once.
+- **Clean, themeable UI.** A compact accounts table with avatars, a details
+  pane and a launch bar, in a **Modern** or a dense **Classic** layout.
+  Themes include System, Light, Dark, the Catppuccin family (Mocha,
+  Macchiato, Frappé, Latte), Nord, Dracula, Gruvbox, Rosé Pine and a muted
+  Lineage palette, plus a custom accent and a compact density.
+- **Honest status.** Sign-in and client status are separate and say only
+  what was actually observed; a network problem never reads as "Signed out".
+- **Import and export.** Preview-first import from Roblox Account Manager's
+  `AccountData.json` (optionally into the vault), and export back out.
+- **Small and quiet.** One executable, no background service, no admin
+  rights, no telemetry, no updater.
 
 ## Getting started
 
-1. Run `waypoint.exe`.
-2. Add an account with **Ctrl+N**, or import from Roblox Account Manager
-   with **Ctrl+I** ([migration notes](docs/MIGRATION.md)).
-3. In the details pane choose the account's **Browser** and **Profile**,
-   then **Sign in in browser**.
-4. Pick a destination in **Launch to** (Rogue Lineage is pinned) and press
+1. Run `RAM.exe`.
+2. Add an account with **Ctrl+N**, or import from Roblox Account Manager with
+   **Ctrl+I** ([migration notes](docs/MIGRATION.md)).
+3. (Recommended) In **Settings → Security**, set up the cookie vault.
+4. Select an account and choose **Cookie → Set…** in the details pane to
+   store its `.ROBLOSECURITY` cookie, or use **Sign in in browser**.
+5. Pick a destination in **Launch to** (Rogue Lineage is pinned) and press
    **Enter**.
+
+## The cookie vault
+
+RAM can store each account's Roblox session cookie so it can launch and
+verify without a browser. Cookies are never written to the plain data file
+or the log.
+
+- **Windows account (DPAPI).** Unlocks automatically for your Windows user;
+  unreadable on any other machine or account. No password.
+- **Master password.** The vault key is wrapped with a key derived from your
+  password through Argon2id (64 MiB, 3 passes) and AES-256-GCM. The vault
+  locks itself after idle time and must be unlocked with the password. A
+  one-time **recovery code** can also unlock it if you forget the password.
+
+Revealing or copying a raw cookie always asks for **Windows Hello** (or the
+master password). Removing an account, or the vault, deletes its stored
+cookies from the PC; your Roblox sessions are unaffected.
+
+## Launching
+
+- **Direct (default when a cookie is stored and the vault is unlocked).** RAM
+  exchanges the cookie for a one-time Roblox authentication ticket and starts
+  the client. If the cookie has expired, it falls back to the browser and
+  marks the account signed out.
+- **Browser hand-off.** Opens the join link in the account's browser profile
+  (Chrome, Edge, Brave, Vivaldi or Firefox), and the browser starts Roblox.
+- **Multi-instance (on by default).** RAM holds Roblox's single-instance
+  lock so more than one client can run. This owns a named Windows object
+  only; it does not modify or inject into the client. Roblox does not
+  officially support running several clients — see the
+  [support matrix](docs/SUPPORT_MATRIX.md).
 
 ## Accounts
 
-The main screen is a compact table with a details pane.
+The main screen is a table with a details pane, in two layouts (Settings →
+Appearance → Accounts layout):
 
-- **Search** matches username, alias, tags, notes and group. Narrow it with
-  `tag:farm`, `group:alts`, `user:name`, `note:text`, `is:fav`, `is:main`,
-  `is:running`.
-- **Main.** Pin one account as Main (**Ctrl+M**). Main sorts first, is left
-  out of Select All and batch launches, and is never touched by automatic
-  performance changes. Both exemptions can be changed in settings.
-- **Sign-in status**: *Verified*, *Signed out*, *Verification required*,
-  *CAPTCHA required*, *Check in browser*, *Unknown*, with the time of the
-  last check and one recovery action.
-- **Client status**: *Queued*, *Launching*, *Running*, *Unconfirmed*,
-  *Paused*, *Exited*, *Failed*.
+- **Modern** — avatars, accent selection, a counts-and-legend bar.
+- **Classic** — a dense ONLINE / USERNAME / ALIAS / GROUP / MODE /
+  DESCRIPTION table with inline Place/Job quick-launch, in the style of the
+  original and of alyae.
 
-### What the statuses mean
+Search matches username, alias, tags, notes and group; narrow it with
+`tag:farm`, `group:alts`, `is:fav`, `is:main`, `is:running`. Pin one account
+as **Main** (Ctrl+M): it sorts first, is excluded from Select All and batch
+launches, and is never touched by automatic performance changes.
+
+### Sign-in status
 
 | Status | Meaning |
 |---|---|
-| Verified | Roblox confirmed this account through its OAuth sign-in at the time shown. Needs the optional setup in Settings. |
-| Signed out | Roblox explicitly rejected the saved authorization. |
-| Verification required | You (or Roblox) reported that a verification step is pending. Launches for the account pause until you choose **Resume**. |
-| CAPTCHA required | Shown only when an explicit signal names a CAPTCHA. |
-| Check in browser | Waypoint opened a page in the browser and cannot see the result. |
-| Unknown | Nothing is known yet, for example right after an import. |
-| Running | A client process is linked to the account. The details pane says how: matched by launch timing, or assigned by you. |
-| Unconfirmed | A client started, but more than one launch could explain it. Assign it in Performance. |
+| Verified | Roblox confirmed this account (via the stored cookie, or OAuth) at the time shown. |
+| Signed out | Roblox explicitly rejected the cookie or authorization. |
+| Verification required | A verification step is pending; launches pause until you resume. |
+| Check in browser | RAM opened a page in the browser and cannot see the result. |
+| Unknown | Nothing known yet, e.g. right after an import. |
 
-## Destinations
+## Performance tools (optional, off by default)
 
-- **Rogue Lineage** is built in and pinned. Other games work the same way.
-- Paste a Roblox link or a place ID to save a named shortcut. Waypoint
-  validates it and tells you what kind it is:
-  - **Saved** — the experience itself; always joinable.
-  - **Saved link** — a private-server or share link; it stops working if
-    its owner regenerates it.
-  - **Live server** — one specific running server; it may have closed.
-- Recent launches are kept per account for a one-click repeat.
-
-Private-server links and share codes are never shown in lists, logs or
-diagnostics.
-
-## Performance tools (optional)
-
-Everything is off until you turn it on, and **Reset overrides**
-(**Ctrl+Shift+R**) puts every client back the way it was.
-
-- Presets for background clients: **Off**, **Balanced** (below-normal
-  priority), **Low Resource** (low priority and Windows efficiency mode).
-  Per-account overrides are in the details pane.
-- Optional hard CPU limit through a Windows Job Object.
-- Live CPU, working set, private memory and GPU use per client, where
-  Windows provides them.
-- Advisory memory thresholds, with a one-click action to close a selected
-  background client. Waypoint never trims memory or force-closes a client.
-- Idle reminders, focus-client shortcut and tiling for identified clients.
-
-Limits that are stated in the app rather than worked around:
-
-- Roblox keeps one frame-rate cap and one graphics setting per Windows
-  user, so there is no per-client FPS or graphics control. The global cap
-  is shown and left alone.
-- Windows has no per-process GPU cap.
-- Roblox does not officially support running several clients at once, and
-  Waypoint does not bypass that. It manages however many clients Roblox
-  allows.
-
-The full list, with what has and has not been tested against a live client,
-is in the [support matrix](docs/SUPPORT_MATRIX.md).
+Presets for background clients (**Balanced**, **Low Resource**), an optional
+Job Object CPU cap, live CPU/RAM/GPU per client, advisory memory thresholds,
+idle reminders, focus and tiling, and a one-click **Reset overrides**
+(Ctrl+Shift+R). Main is exempt by default. RAM never trims memory or
+force-closes a client. Per-client FPS/graphics and a hard GPU cap are not
+offered, with the reasons shown in the app. The full list, with what has and
+has not been tested against a live client, is in the
+[support matrix](docs/SUPPORT_MATRIX.md).
 
 ## Keyboard
 
 | Keys | Action |
 |---|---|
-| Ctrl+1 … Ctrl+4 | Accounts, Destinations, Performance, Settings |
-| Ctrl+F | Search accounts |
-| Enter | Launch the selected accounts to the chosen destination |
-| Ctrl+L | Launch |
-| Esc | Clear the search; with an empty search, cancel queued launches |
-| Ctrl+N | Add account |
-| Ctrl+I | Import |
-| Delete | Remove the selected accounts or destination |
-| Ctrl+A | Select all (Main is left out) |
-| Ctrl+M | Pin or unpin Main |
-| Ctrl+D | Favorite |
-| F5 | Check sign-in |
-| F6 | Focus the selected account's client |
-| Ctrl+R | Rejoin |
+| Ctrl+1…4 | Accounts, Destinations, Performance, Settings |
+| Ctrl+F | Search · Enter | Launch · Ctrl+L | Launch |
+| Ctrl+N | Add · Ctrl+I | Import · Delete | Remove |
+| Ctrl+A | Select all (Main excluded) · Ctrl+M | Main · Ctrl+D | Favorite |
+| F5 | Check sign-in · F6 | Focus client · Ctrl+R | Rejoin |
 | Ctrl+Shift+R | Reset performance overrides |
-| Tab / Shift+Tab | Move between controls |
-
-## Verified sign-in (optional)
-
-Without setup, sign-in status stays at *Check in browser* because Waypoint
-does not read browser sessions. To let Roblox confirm an account:
-
-1. In the Roblox Creator Dashboard create an OAuth 2.0 app with the scopes
-   `openid` and `profile` and the redirect URL shown in Settings
-   (`http://localhost:53682/callback` by default).
-2. Paste the app's client ID in Settings.
-3. Select an account and choose **Authorize**. Roblox asks for consent in
-   the account's browser profile.
-
-The authorization only identifies the account. It cannot launch games or
-act as the user. It is kept in Windows Credential Manager.
 
 ## Building
 
@@ -158,9 +140,19 @@ cargo build --release -p ram-app
 - [Migration notes](docs/MIGRATION.md)
 - [Support matrix](docs/SUPPORT_MATRIX.md)
 - [Benchmarks](docs/BENCHMARKS.md)
-- [Legacy source audit](docs/LEGACY_AUDIT.md)
-- [Research notes](docs/RESEARCH_NOTES.md)
+- [Legacy source audit](docs/LEGACY_AUDIT.md) · [Research notes](docs/RESEARCH_NOTES.md)
+
+## Security notes
+
+Storing session cookies is powerful and risky: anyone who can read a
+decrypted cookie can sign in as that account. RAM encrypts them at rest and
+gates reveal/copy behind Windows Hello or the master password, but it cannot
+protect against malware already running as your Windows user. Use the master
+password mode on shared machines, keep your recovery code offline, and
+remove cookies you no longer need.
 
 ## Licence
 
-GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). Roblox
+and Rogue Lineage are trademarks of their owners; RAM is unaffiliated and
+does not modify the Roblox client.

@@ -1,5 +1,21 @@
 # Support matrix
 
+> **Note.** This matrix was first written for the no-credentials design. RAM
+> now also provides an encrypted cookie vault, direct (ticket) launch, and
+> multi-instance on by default. Those are summarised here and detailed in
+> [DECISIONS.md](DECISIONS.md); rows that say "no cookie is stored" apply when
+> you do not set up the vault.
+>
+> | Feature | Status | Needs live test |
+> |---|---|---|
+> | Encrypted cookie vault (DPAPI; Argon2id + AES-256-GCM; auto-lock; recovery code) | Verified (unit tests) | No |
+> | Reveal/copy gated by Windows Hello or master password | Conditional | Hello confirmed available on the dev PC; a full Verified/Canceled result not driven |
+> | Direct launch via authentication ticket | Conditional | Yes - ticket flow unit-tested against scripted responses; not run against live Roblox |
+> | Multi-instance (singleton hold), on by default | Conditional | Mutex ownership unit-tested; not verified to let two real clients run |
+> | Themes: System/Light/Dark/Catppuccin x4/Nord/Dracula/Gruvbox/Rose Pine/Lineage, accent, density | Verified | No |
+> | Modern and Classic account layouts | Verified | No |
+> | Export to AccountData.json (with or without cookies) | Verified (unit tests) | No |
+
 Each feature has one status:
 
 - **Verified** — exercised on Windows 11 (build 26300) during development,
@@ -62,7 +78,7 @@ a real client or a real sign-in is marked.
 | Join a specific server (`gameInstanceId`) | Conditional | Yes | Documented parameter; community reports say it is sometimes ignored. |
 | Private-server and share links | Conditional | Yes | Stop working when the owner regenerates the link. |
 | Batch queue with bounded concurrency, spacing and cancel | Verified | No | Unit tests. Hand-offs already sent to the browser cannot be recalled. |
-| Several clients at once | Conditional | Yes | Roblox does not officially support concurrent clients and Waypoint does not bypass its single-instance check. If a second launch replaces or is refused by the first client, Waypoint shows what it observes. |
+| Several clients at once | Conditional | Yes | Roblox does not officially support concurrent clients and RAM does not bypass its single-instance check. If a second launch replaces or is refused by the first client, RAM shows what it observes. |
 | Launch with an authentication ticket (no browser) | Unavailable | — | Requires the session cookie. |
 
 ## Client tracking
@@ -94,7 +110,7 @@ a real client or a real sign-in is marked.
 | Memory thresholds and notifications | Verified | No | Advisory only. Notifications use a tray balloon. |
 | Close a selected background client | Conditional | Yes | Sends a normal close request to the client's window after confirmation. Never terminates. |
 | Memory trimming, forced termination | Unavailable | — | Deliberately not provided. |
-| Idle reminders | Conditional | Yes | Based on how long a client has not been the foreground window while Waypoint is running. No input is sent to the client. |
+| Idle reminders | Conditional | Yes | Based on how long a client has not been the foreground window while RAM is running. No input is sent to the client. |
 | Focus a client; tile identified clients; undo tiling | Conditional | Yes | Tested with a stand-in window. Windows may refuse to bring a window forward when the request is not user-initiated. |
 
 ## Removed from the legacy app

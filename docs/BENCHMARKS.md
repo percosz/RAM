@@ -1,14 +1,14 @@
 # Benchmarks
 
 Measured on 2026-11-20 against the packaged release
-(`Waypoint-0.1.0-x64.zip`, built by `scripts\package.ps1`).
+(`RAM-0.1.0-x64.zip`, built by `scripts\package.ps1`).
 
 **Test machine:** AMD Ryzen 5 5600 (6 cores, 12 threads), 32 GB RAM,
 Windows 11 build 26300, 100% display scaling.
 
 ## What was and was not measured
 
-| Measurement | Waypoint 0.1.0 | Legacy 3.7.2 |
+| Measurement | RAM 0.1.0 | Legacy 3.7.2 |
 |---|---|---|
 | Manager startup, idle CPU, memory, package size, responsiveness with 100 accounts | **Measured** (below) | **Not measured** |
 | Roblox client resource use and Main-client frame times, one and several clients | **Not measured** | **Not measured** |
@@ -20,7 +20,7 @@ Two gaps, stated plainly:
    credentials, downloads further components on first start and updates
    itself, and it was not run unattended. The only legacy figure below is
    the download size published on the release page. The same script that
-   produced the Waypoint numbers measures any executable, so the comparison
+   produced the RAM numbers measures any executable, so the comparison
    can be completed on your PC in a few minutes (see
    [Completing the comparison](#completing-the-comparison)).
 2. **No client measurements.** No Roblox account was signed in and no
@@ -31,7 +31,7 @@ Two gaps, stated plainly:
 Because there is no measured baseline, no speed-up factor is claimed. The
 10× goal is neither confirmed nor refuted by these numbers.
 
-## Waypoint 0.1.0, manager only
+## RAM 0.1.0, manager only
 
 All figures are for the manager's own process tree, with 100 saved accounts
 and no Roblox client running.
@@ -39,7 +39,7 @@ and no Roblox client running.
 | Metric | Result | How |
 |---|---|---|
 | Package size (zip) | **0.45 MB** (475 512 bytes) | `scripts\bench.ps1` |
-| Installed size | 0.93 MB; `waypoint.exe` is 0.76 MB (800 256 bytes) | Unpacked folder including documentation |
+| Installed size | 0.93 MB; `RAM.exe` is 0.76 MB (800 256 bytes) | Unpacked folder including documentation |
 | Processes | **1** (3 threads, about 200 handles) | No helper processes, no embedded browser |
 | Startup to first painted frame | **138–145 ms** (7 runs, median 139 ms) | `--bench-startup`: process entry to the end of the first paint |
 | Startup as seen from outside | median **158 ms**, best 143 ms | `scripts\bench.ps1`: launch until the main window exists and its input queue is idle |
@@ -114,7 +114,7 @@ busy.
 ```
 
 ```powershell
-.\scripts\bench.ps1 -Exe .\dist\Waypoint-0.1.0-x64\waypoint.exe -PackagePath .\dist\Waypoint-0.1.0-x64.zip -Label waypoint-0.1.0
+.\scripts\bench.ps1 -Exe .\dist\RAM-0.1.0-x64\RAM.exe -PackagePath .\dist\RAM-0.1.0-x64.zip -Label RAM-0.1.0
 ```
 
 Each run writes `bench-<label>.json` with startup (first, median, best),
@@ -143,7 +143,7 @@ version, graphics settings, place and server the same across runs.
    ```
 
 2. **Several clients, presets Off** — only if Roblox lets more than one
-   client run on your setup; Waypoint does not force it. Repeat both
+   client run on your setup; RAM does not force it. Repeat both
    commands with `-Label n-clients-off`.
 3. **Several clients, Balanced, then Low Resource.** Change the preset in
    the Performance view, wait 30 s, repeat with a new label.
@@ -159,5 +159,5 @@ since it determines which controls are usable on your setup.
 ## Reproducible package
 
 Two clean builds of the same commit in different build directories produced
-byte-identical `waypoint.exe` and zip files. The hashes for a build are
+byte-identical `RAM.exe` and zip files. The hashes for a build are
 printed by `scripts\package.ps1` and written next to the zip.

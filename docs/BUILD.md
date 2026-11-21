@@ -1,4 +1,4 @@
-# Building Waypoint
+# Building RAM
 
 ## Requirements
 
@@ -31,7 +31,7 @@ cargo build --release -p ram-app
 ```
 
 ```powershell
-& "$env:CARGO_TARGET_DIR\release\waypoint.exe"
+& "$env:CARGO_TARGET_DIR\release\RAM.exe"
 ```
 
 The program is a single executable. It needs no installer, no runtime, no
@@ -60,7 +60,7 @@ cargo test -p ram-win -- --ignored
 ```
 
 This runs the tests, builds with `--locked`, and writes
-`dist\Waypoint-<version>-x64.zip` and its `.sha256`. The script remaps local
+`dist\RAM-<version>-x64.zip` and its `.sha256`. The script remaps local
 paths out of the binary and writes zip entries in a fixed order with a fixed
 timestamp. With the same commit, the pinned toolchain and the same Windows
 SDK version, the executable and zip hashes are the same on every run; the
@@ -70,7 +70,7 @@ script prints both so two builds can be compared.
 
 | Option | Purpose |
 |---|---|
-| `--data-dir <folder>` | Use this folder instead of `%LOCALAPPDATA%\Waypoint`. Allows a second instance. |
+| `--data-dir <folder>` | Use this folder instead of `%LOCALAPPDATA%\RAM`. Allows a second instance. |
 | `--seed-demo <n>` | Fill the store with `n` demo accounts (for UI checks and benchmarks). |
 | `--bench-startup` | Write the time to the first painted frame to `bench-startup.txt` in the data folder, then exit. |
 | `--bench-ui` | Measure search, selection and repaint times, write `bench-ui.txt`, then exit. |
@@ -78,7 +78,7 @@ script prints both so two builds can be compared.
 ## Benchmarks
 
 ```powershell
-.\scripts\bench.ps1 -Exe dist\Waypoint-0.1.0-x64\waypoint.exe -Arguments '--data-dir','C:\tmp\wp-bench','--seed-demo','100' -PackagePath dist\Waypoint-0.1.0-x64.zip
+.\scripts\bench.ps1 -Exe dist\RAM-0.1.0-x64\RAM.exe -Arguments '--data-dir','C:\tmp\wp-bench','--seed-demo','100' -PackagePath dist\RAM-0.1.0-x64.zip
 ```
 
 The same script measures any other GUI executable, which is how the legacy

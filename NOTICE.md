@@ -1,12 +1,12 @@
 # Notices
 
-Waypoint is free software, licensed under the GNU General Public License,
+RAM is free software, licensed under the GNU General Public License,
 version 3 or (at your option) any later version. The full text is in
 [LICENSE](LICENSE). It comes with no warranty.
 
 ## Origin
 
-Waypoint is a fork and rewrite of **Roblox Account Manager** by ic3w0lf22
+RAM is a fork and rewrite of **Roblox Account Manager** by ic3w0lf22
 and contributors:
 
 - Upstream: <https://github.com/ic3w0lf22/Roblox-Account-Manager> (GPL-3.0)
@@ -42,13 +42,17 @@ people use multi-account tools.
 |---|---|---|
 | [windows](https://crates.io/crates/windows) (Microsoft) | MIT OR Apache-2.0 | Win32 API bindings |
 | [serde](https://crates.io/crates/serde), [serde_json](https://crates.io/crates/serde_json) and their dependencies (itoa, memchr, zmij or ryu) | MIT OR Apache-2.0 | Data file format |
-| [embed-manifest](https://crates.io/crates/embed-manifest) | MIT | Build-time only: application manifest |
+| [argon2](https://crates.io/crates/argon2) | MIT OR Apache-2.0 | Master-password key derivation (vault) |
+| [aes-gcm](https://crates.io/crates/aes-gcm) | Apache-2.0 OR MIT | Cookie encryption (vault) |
+| [zeroize](https://crates.io/crates/zeroize), [rand](https://crates.io/crates/rand) | MIT OR Apache-2.0 | Key hygiene and randomness |
+| [winresource](https://crates.io/crates/winresource) | MIT | Build-time only: icon, version info and manifest |
 
 The exact versions are pinned in `Cargo.lock`.
 
 ## Trademarks and affiliation
 
 Roblox is a trademark of Roblox Corporation. Rogue Lineage is the work of
-its developers. Waypoint is not affiliated with, endorsed by or sponsored by
-either. It does not modify the Roblox client and does not handle Roblox
-passwords or session cookies.
+its developers. RAM is not affiliated with, endorsed by or sponsored by
+either. It does not modify the Roblox client and never handles Roblox
+passwords. It stores Roblox session cookies only when you choose to, encrypted
+at rest with Windows data protection or a master password.
