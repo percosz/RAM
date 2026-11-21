@@ -2176,7 +2176,7 @@ mod tests {
     impl TempDir {
         fn new(tag: &str) -> TempDir {
             let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-            let dir = std::env::temp_dir().join(format!("waypoint-import-{tag}-{}-{nanos}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("RAM-import-{tag}-{}-{nanos}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             TempDir(dir)
         }
@@ -2225,7 +2225,7 @@ mod tests {
 
     #[test]
     fn scanning_odd_folders_reports_instead_of_failing() {
-        let missing = scan(Path::new("Z:/definitely/not/a/real/folder-waypoint"), None);
+        let missing = scan(Path::new("Z:/definitely/not/a/real/folder-RAM"), None);
         assert_eq!(missing.account_file, AccountFileKind::Missing);
         assert_eq!(missing.notices.len(), 5);
 

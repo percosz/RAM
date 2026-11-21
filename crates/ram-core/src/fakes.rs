@@ -146,15 +146,39 @@ impl WindowApi for FakeSystem {
 #[derive(Default)]
 pub struct FakeHttp {
     pub responses: RefCell<Vec<Result<HttpResponse, NetError>>>,
+    /// Recorded (method, url, body) of each request.
     pub requests: RefCell<Vec<(String, String, String)>>,
+    /// Recorded request headers, parallel to `requests`.
+    pub sent_headers: RefCell<Vec<Vec<(String, String)>>>,
 }
 
 impl FakeHttp {
     pub fn push(&self, status: u16, body: &str) {
-        self.responses.borrow_mut().push(Ok(HttpResponse { status, retry_after: None, body: body.as_bytes().to_vec() }));
+        self.responses.borrow_mut().push(Ok(HttpResponse {
+            status,
+            retry_after: None,
+            headers: Vec::new(),
+            body: body.as_bytes().to_vec(),
+        }));
+    }
+    /// Pushes a response with specific response headers.
+    pub fn push_full(&self, status: u16, headers: &[(&str, &str)], body: &str) {
+        self.responses.borrow_mut().push(Ok(HttpResponse {
+            status,
+            retry_after: None,
+            headers: headers.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.to_string())).collect(),
+            body: body.as_bytes().to_vec(),
+        }));
     }
     pub fn push_err(&self, e: NetError) {
         self.responses.borrow_mut().push(Err(e));
+    }
+    /// Request headers of the nth request.
+    pub fn sent_header(&self, n: usize, name: &str) -> Option<String> {
+        let name = name.to_ascii_lowercase();
+        self.sent_headers.borrow().get(n).and_then(|hs| {
+            hs.iter().find(|(k, _)| k.to_ascii_lowercase() == name).map(|(_, v)| v.clone())
+        })
     }
 }
 
@@ -163,10 +187,13 @@ impl HttpApi for FakeHttp {
         &self,
         method: &str,
         url: &str,
-        _headers: &[(&str, &str)],
+        headers: &[(&str, &str)],
         body: Option<&[u8]>,
         _timeout_ms: u32,
     ) -> Result<HttpResponse, NetError> {
+        self.sent_headers
+            .borrow_mut()
+            .push(headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
         self.requests.borrow_mut().push((
             method.to_string(),
             url.to_string(),

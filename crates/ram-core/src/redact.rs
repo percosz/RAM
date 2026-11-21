@@ -217,7 +217,7 @@ mod tests {
     fn log_lines_are_redacted_on_disk() {
         let dir = std::env::temp_dir().join(format!("ram-core-log-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let log = Log::new(dir.join("waypoint.log"));
+        let log = Log::new(dir.join("RAM.log"));
         log.line(1, "open https://www.roblox.com/games/1?privateServerLinkCode=LEAKME\nsecond");
         let text = fs::read_to_string(log.path()).unwrap();
         assert!(!text.contains("LEAKME"));

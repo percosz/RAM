@@ -3,8 +3,12 @@ name = "ram-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Platform-independent core: model, store, importer, sign-in and client state, performance policy."
+description = "Platform-independent core: model, store, importer/exporter, sign-in, client state, launch and secret vault."
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+argon2 = "0.6.0"
+aes-gcm = "0.11.1"
+zeroize = { version = "1.9.2", features = ["derive"] }
+rand = "0.10.4"

@@ -330,11 +330,11 @@ pub fn wait_for_redirect(
         let request = String::from_utf8_lossy(&buf[..n]);
         let parsed = parse_redirect(&request, expected_state);
         let page = match &parsed {
-            Some(Ok(_)) => "Authorization received. You can close this tab and return to Waypoint.",
+            Some(Ok(_)) => "Authorization received. You can close this tab and return to RAM.",
             Some(Err(_)) => "Roblox did not grant the authorization. You can close this tab.",
             None => "This address only receives the Roblox authorization redirect.",
         };
-        let body = format!("<!doctype html><meta charset=utf-8><title>Waypoint</title><p style=\"font:16px system-ui;margin:3em\">{page}</p>");
+        let body = format!("<!doctype html><meta charset=utf-8><title>RAM</title><p style=\"font:16px system-ui;margin:3em\">{page}</p>");
         let _ = write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn rate_limit_and_server_errors_are_inconclusive() {
         let (http, secrets) = (FakeHttp::default(), secrets_with_token());
-        http.responses.borrow_mut().push(Ok(HttpResponse { status: 429, retry_after: Some(30), body: vec![] }));
+        http.responses.borrow_mut().push(Ok(HttpResponse { status: 429, retry_after: Some(30), headers: Vec::new(), body: vec![] }));
         assert_eq!(check_account(&http, &secrets, "cid", 7, None).outcome, CheckOutcome::RateLimited { retry_after_secs: Some(30) });
         http.push(503, "busy");
         assert_eq!(check_account(&http, &secrets, "cid", 7, None).outcome, CheckOutcome::ServiceError { status: 503 });

@@ -340,14 +340,75 @@ pub struct RecentLaunch {
     pub at: i64,
 }
 
+/// A named colour theme. `System` follows the Windows light/dark setting;
+/// the rest are fixed palettes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ThemeKind {
     #[default]
     System,
     Light,
     Dark,
+    Mocha,
+    Macchiato,
+    Frappe,
+    Latte,
+    Nord,
+    Dracula,
+    Gruvbox,
+    RosePine,
     /// Muted, Rogue Lineage-inspired palette.
     Lineage,
+}
+
+impl ThemeKind {
+    /// All themes in the order shown in the picker.
+    pub fn all() -> &'static [ThemeKind] {
+        use ThemeKind::*;
+        &[System, Light, Dark, Mocha, Macchiato, Frappe, Latte, Nord, Dracula, Gruvbox, RosePine, Lineage]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeKind::System => "System",
+            ThemeKind::Light => "Light",
+            ThemeKind::Dark => "Dark",
+            ThemeKind::Mocha => "Catppuccin Mocha",
+            ThemeKind::Macchiato => "Catppuccin Macchiato",
+            ThemeKind::Frappe => "Catppuccin Frappé",
+            ThemeKind::Latte => "Catppuccin Latte",
+            ThemeKind::Nord => "Nord",
+            ThemeKind::Dracula => "Dracula",
+            ThemeKind::Gruvbox => "Gruvbox",
+            ThemeKind::RosePine => "Rosé Pine",
+            ThemeKind::Lineage => "Lineage (muted)",
+        }
+    }
+}
+
+/// How the Accounts screen is laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum LayoutMode {
+    /// The modern screen: avatars, grouped list, details card, legend bar.
+    #[default]
+    Modern,
+    /// The classic dense table with an inline quick-launch toolbar.
+    Classic,
+}
+
+impl LayoutMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            LayoutMode::Modern => "Modern",
+            LayoutMode::Classic => "Classic",
+        }
+    }
+}
+
+fn default_corner() -> i32 {
+    6
+}
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -357,6 +418,19 @@ pub struct Settings {
     /// Custom accent as 0xRRGGBB; `None` uses the theme's accent.
     pub accent: Option<u32>,
     pub compact: bool,
+    /// Modern or classic Accounts layout.
+    #[serde(default)]
+    pub layout: LayoutMode,
+    /// Corner radius for panels, buttons and fields, in device pixels.
+    #[serde(default = "default_corner")]
+    pub corner_radius: i32,
+    /// Launch the client directly with a stored cookie when the vault is
+    /// unlocked, instead of handing off to the browser.
+    #[serde(default = "yes")]
+    pub direct_launch: bool,
+    /// Hold the Roblox singleton object so several clients can run at once.
+    #[serde(default = "yes")]
+    pub multi_instance: bool,
     /// Launch handoffs in flight at once.
     pub launch_concurrency: u32,
     /// Minimum seconds between two handoffs in a batch.
@@ -383,6 +457,10 @@ impl Default for Settings {
             theme: ThemeKind::System,
             accent: None,
             compact: false,
+            layout: LayoutMode::Modern,
+            corner_radius: default_corner(),
+            direct_launch: true,
+            multi_instance: true,
             launch_concurrency: 1,
             launch_spacing_secs: 8,
             launch_timeout_secs: 90,

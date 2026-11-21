@@ -213,12 +213,22 @@ pub enum NetError {
     Other(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HttpResponse {
     pub status: u16,
     /// Value of `Retry-After` in seconds when present.
     pub retry_after: Option<u64>,
+    /// Response headers as (lowercased name, value) pairs.
+    pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+}
+
+impl HttpResponse {
+    /// The first value of a header, matched case-insensitively.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let name = name.to_ascii_lowercase();
+        self.headers.iter().find(|(k, _)| *k == name).map(|(_, v)| v.as_str())
+    }
 }
 
 pub trait HttpApi {
