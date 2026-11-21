@@ -82,7 +82,9 @@ fn sample_reports_memory_cpu_and_priority() {
     let sample = procs.sample(key).unwrap();
     assert!(sample.working_set > 0);
     assert!(sample.private_bytes > 0);
-    assert_eq!(sample.priority, Some(PriorityClass::Normal));
+    // The child inherits the test runner's class (BelowNormal on GitHub's
+    // runners), so compare with what the process API reports, not Normal.
+    assert_eq!(sample.priority, Some(procs.priority(key).unwrap()));
     // GPU fields stay empty until collect_gpu has run.
     assert_eq!(sample.gpu_percent, None);
     assert_eq!(sample.gpu_dedicated_bytes, None);
@@ -108,6 +110,7 @@ fn priority_can_be_lowered_and_restored() {
     let procs = ping_processes();
     let child = spawn_idle();
     let key = key_of(&procs, &child);
+    procs.set_priority(key, PriorityClass::Normal).unwrap();
     assert_eq!(procs.priority(key), Ok(PriorityClass::Normal));
     procs.set_priority(key, PriorityClass::BelowNormal).unwrap();
     assert_eq!(procs.priority(key), Ok(PriorityClass::BelowNormal));
@@ -123,6 +126,7 @@ fn efficiency_mode_turns_on_and_back_to_system_managed() {
     let procs = ping_processes();
     let child = spawn_idle();
     let key = key_of(&procs, &child);
+    let before = procs.priority(key).unwrap();
 
     procs.set_efficiency_mode(key, true).unwrap();
     let on = throttling_state(&child);
@@ -134,7 +138,7 @@ fn efficiency_mode_turns_on_and_back_to_system_managed() {
     assert_eq!(off.ControlMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 0, "{off:?}");
 
     // Efficiency mode leaves the priority class alone.
-    assert_eq!(procs.priority(key), Ok(PriorityClass::Normal));
+    assert_eq!(procs.priority(key), Ok(before));
 }
 
 #[test]
@@ -142,6 +146,7 @@ fn stale_key_is_not_found_for_every_mutating_call() {
     let procs = ping_processes();
     let child = spawn_idle();
     let key = key_of(&procs, &child);
+    let before = procs.priority(key).unwrap();
     let stale = ProcKey {
         pid: key.pid,
         start_time: key.start_time + 1,
@@ -177,7 +182,7 @@ fn stale_key_is_not_found_for_every_mutating_call() {
     assert!(!watcher.is_watching(stale));
 
     // The real process was left exactly as it was.
-    assert_eq!(procs.priority(key), Ok(PriorityClass::Normal));
+    assert_eq!(procs.priority(key), Ok(before));
     assert!(procs.is_alive(key));
 }
 
