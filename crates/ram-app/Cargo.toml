@@ -7,7 +7,7 @@ description = "Waypoint: a Windows account manager for Roblox with browser hand-
 build = "build.rs"
 
 [[bin]]
-name = "waypoint"
+name = "RAM"
 path = "src/main.rs"
 
 [dependencies]
@@ -36,4 +36,4 @@ features = [
 ]
 
 [build-dependencies]
-embed-manifest = "1.4"
+winresource = "0.1.34"

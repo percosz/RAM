@@ -35,18 +35,24 @@ const ID_CLIP: u16 = 1314;
 /// Validation text under the accent field. Its own ID gives it the ordinary
 /// text color, so it stands out from the muted hints.
 pub const ID_ACCENT_NOTE: u16 = 1315;
+const ID_LAYOUT: u16 = 1316;
+const ID_DIRECT: u16 = 1317;
+const ID_MULTI: u16 = 1318;
+const ID_VAULT_SETUP: u16 = 1319;
+const ID_VAULT_UNLOCK: u16 = 1320;
+const ID_VAULT_LOCK: u16 = 1321;
+const ID_VAULT_CHANGE: u16 = 1322;
+const ID_VAULT_REMOVE: u16 = 1323;
+const ID_VAULT_HELLO: u16 = 1324;
+const ID_VAULT_AUTOLOCK: u16 = 1325;
+const ID_EXPORT: u16 = 1326;
 
 const EN_CHANGE_CODE: u16 = 0x0300;
 const EN_KILLFOCUS_CODE: u16 = 0x0200;
 const CBN_SELCHANGE_CODE: u16 = 1;
 const CLICKED: u16 = 0;
 
-const THEMES: [(ThemeKind, &str); 4] = [
-    (ThemeKind::System, "System"),
-    (ThemeKind::Light, "Light"),
-    (ThemeKind::Dark, "Dark"),
-    (ThemeKind::Lineage, "Lineage (muted)"),
-];
+// Themes come from ThemeKind::all(); the picker lists every one.
 
 const ACCENT_INVALID: &str = "Use the form #RRGGBB.";
 const LOG_TAIL_LINES: usize = 40;
@@ -60,7 +66,7 @@ extern "system" {
 pub struct SettingsView {
     /// The first focusable control; it gets focus when the view opens.
     pub first: HWND,
-    sections: [HWND; 4],
+    sections: [HWND; 5],
     l_theme: HWND,
     theme: HWND,
     l_accent: HWND,
@@ -68,7 +74,24 @@ pub struct SettingsView {
     accent_reset: HWND,
     accent_note: HWND,
     compact: HWND,
+    l_layout: HWND,
+    layout: HWND,
     contrast_note: HWND,
+    direct: HWND,
+    multi: HWND,
+    multi_note: HWND,
+    // Security (cookie vault).
+    vault_status: HWND,
+    vault_setup: HWND,
+    vault_unlock: HWND,
+    vault_lock: HWND,
+    vault_change: HWND,
+    vault_remove: HWND,
+    vault_hello: HWND,
+    l_autolock: HWND,
+    autolock: HWND,
+    h_autolock: HWND,
+    export_btn: HWND,
     l_concurrency: HWND,
     concurrency: HWND,
     h_concurrency: HWND,
@@ -117,8 +140,8 @@ pub fn create(app: &mut App) {
     v.sections[0] = muted("Appearance");
     v.l_theme = ui::label(p, LABEL, "Theme");
     v.theme = ui::combo(p, ID_THEME);
-    for (_, name) in THEMES {
-        ui::combo_add(v.theme, name);
+    for t in ThemeKind::all() {
+        ui::combo_add(v.theme, t.label());
     }
     v.l_accent = ui::label(p, LABEL, "Accent color");
     v.accent = ui::edit(p, ID_ACCENT);
@@ -127,6 +150,10 @@ pub fn create(app: &mut App) {
     v.accent_reset = ui::button(p, ID_ACCENT_RESET, "Reset");
     v.accent_note = ui::label(p, ID_ACCENT_NOTE, "");
     v.compact = ui::checkbox(p, ID_COMPACT, "Compact density");
+    v.l_layout = ui::label(p, LABEL, "Accounts layout");
+    v.layout = ui::combo(p, ID_LAYOUT);
+    ui::combo_add(v.layout, "Modern");
+    ui::combo_add(v.layout, "Classic");
     v.contrast_note = ui::paragraph(p, LABEL_MUTED, "High-contrast mode always uses the Windows colors.");
 
     v.sections[1] = muted("Launching");
@@ -147,8 +174,27 @@ pub fn create(app: &mut App) {
     v.include_main = ui::checkbox(p, ID_INCLUDE_MAIN, "Include Main in Select All and batch actions");
     v.main_note =
         ui::paragraph(p, LABEL_MUTED, "Off by default: Main is only launched when you select it on its own.");
+    v.direct = ui::checkbox(p, ID_DIRECT, "Launch directly with a stored cookie when the vault is unlocked");
+    v.multi = ui::checkbox(p, ID_MULTI, "Run several Roblox clients at once (multi-instance)");
+    v.multi_note = ui::paragraph(
+        p,
+        LABEL_MUTED,
+        "Multi-instance holds Roblox's single-instance lock so more than one client can run. Roblox does not officially support this; it does not modify the client.",
+    );
 
-    v.sections[2] = muted("Verified sign-in (optional)");
+    v.sections[2] = muted("Security");
+    v.vault_status = ui::paragraph(p, LABEL_MUTED, "");
+    v.vault_setup = ui::button(p, ID_VAULT_SETUP, "Set up vault\u{2026}");
+    v.vault_unlock = ui::button(p, ID_VAULT_UNLOCK, "Unlock");
+    v.vault_lock = ui::button(p, ID_VAULT_LOCK, "Lock");
+    v.vault_change = ui::button(p, ID_VAULT_CHANGE, "Change password\u{2026}");
+    v.vault_remove = ui::button(p, ID_VAULT_REMOVE, "Remove\u{2026}");
+    v.vault_hello = ui::checkbox(p, ID_VAULT_HELLO, "Require Windows Hello to reveal or copy a cookie");
+    v.l_autolock = ui::label(p, LABEL, "Lock after idle");
+    v.autolock = number(ID_VAULT_AUTOLOCK, 4);
+    v.h_autolock = muted("min (0 = never)");
+
+    v.sections[3] = muted("Verified sign-in (optional)");
     v.oauth_note = ui::paragraph(
         p,
         LABEL_MUTED,
@@ -168,15 +214,16 @@ pub fn create(app: &mut App) {
     ui::send(v.redirect, EM_SETREADONLY, 1, 0);
     v.copy_url = ui::button(p, ID_COPY_URL, "Copy");
 
-    v.sections[3] = muted("Data and diagnostics");
+    v.sections[4] = muted("Data and diagnostics");
     v.data_path = muted(&format!("Data folder: {}", app.data_dir.display()));
     v.open_dir = ui::button(p, ID_OPEN_DIR, "Open data folder");
     v.copy_diag = ui::button(p, ID_COPY_DIAG, "Copy diagnostics");
+    v.export_btn = ui::button(p, ID_EXPORT, "Export to AccountData.json\u{2026}");
     v.about = ui::paragraph(
         p,
         LABEL_MUTED,
         &format!(
-            "Waypoint {} \u{2014} a rewrite of Roblox Account Manager by ic3w0lf22, GPL-3.0. Not affiliated with \
+            "RAM {} \u{2014} a rewrite of Roblox Account Manager by ic3w0lf22, GPL-3.0. Not affiliated with \
              Roblox Corporation. Stores no passwords or cookies.",
             env!("CARGO_PKG_VERSION")
         ),
@@ -293,6 +340,9 @@ fn flow_appearance(v: &SettingsView, f: &mut Flow) {
     f.put(v.accent_note, f.field_x(), f.y, f.field_w(), f.line);
     f.y += f.line;
     f.check(v.compact);
+    f.label(v.l_layout);
+    f.put(v.layout, f.field_x(), f.y, field_w, f.row * 6);
+    f.y += f.row + f.gap;
     f.text(v.contrast_note);
 }
 
@@ -307,10 +357,46 @@ fn flow_launching(v: &SettingsView, f: &mut Flow) {
     f.y -= f.gap / 2;
     f.check(v.include_main);
     f.text(v.main_note);
+    f.check(v.direct);
+    f.check(v.multi);
+    f.text(v.multi_note);
+}
+
+fn flow_security(v: &SettingsView, f: &mut Flow, configured: bool, unlocked: bool, master: bool) {
+    f.section(v.sections[2]);
+    f.text(v.vault_status);
+    f.y += f.gap / 2;
+    let mut row: Vec<HWND> = Vec::new();
+    if !configured {
+        row.push(v.vault_setup);
+    } else {
+        row.push(if unlocked { v.vault_lock } else { v.vault_unlock });
+        if master {
+            row.push(v.vault_change);
+        }
+        row.push(v.vault_remove);
+    }
+    let bw = f.button_w * 5 / 2;
+    let mut x = f.x;
+    for &h in &row {
+        if x + bw > f.x + f.w {
+            x = f.x;
+            f.y += f.row + f.gap / 2;
+        }
+        f.put(h, x, f.y, bw, f.row);
+        x += bw + f.gap;
+    }
+    f.y += f.row + f.gap;
+    if configured {
+        f.check(v.vault_hello);
+        if master {
+            f.number(v.l_autolock, v.autolock, v.h_autolock);
+        }
+    }
 }
 
 fn flow_oauth(v: &SettingsView, f: &mut Flow) {
-    f.section(v.sections[2]);
+    f.section(v.sections[3]);
     f.text(v.oauth_note);
     f.y += f.gap;
     f.label(v.l_client_id);
@@ -325,12 +411,14 @@ fn flow_oauth(v: &SettingsView, f: &mut Flow) {
 }
 
 fn flow_data(v: &SettingsView, f: &mut Flow) {
-    f.section(v.sections[3]);
+    f.section(v.sections[4]);
     f.put(v.data_path, f.x, f.y, f.w, f.line);
     f.y += f.line + f.gap / 2;
     let button_w = ((f.w - f.gap) / 2).min(f.number_w * 2 + f.gap);
     f.put(v.open_dir, f.x, f.y, button_w, f.row);
     f.put(v.copy_diag, f.x + button_w + f.gap, f.y, button_w, f.row);
+    f.y += f.row + f.gap;
+    f.put(v.export_btn, f.x, f.y, button_w * 2 + f.gap, f.row);
     f.y += f.row + f.gap;
     f.text(v.about);
 }
@@ -357,9 +445,13 @@ pub fn layout(app: &mut App) {
         number_w: m.px(64),
         button_w: m.px(60),
     };
+    let configured = app.vault_configured();
+    let unlocked = app.is_vault_unlocked();
+    let master = app.vault.mode() == Some(ram_core::vault::VaultMode::MasterPassword);
     let all = |f: &mut Flow| {
         flow_appearance(v, f);
         flow_launching(v, f);
+        flow_security(v, f, configured, unlocked, master);
         flow_oauth(v, f);
         flow_data(v, f);
     };
@@ -372,16 +464,17 @@ pub fn layout(app: &mut App) {
         all(&mut f);
     } else {
         // Too tall for one column: appearance and launching on the left,
-        // sign-in and data on the right.
+        // security, sign-in and data on the right.
         let between = 3 * gap;
         let column_w = ((rc.right - 2 * gap - between) / 2).min(m.px(640));
-        let left_labels = [v.l_theme, v.l_accent, v.l_concurrency, v.l_spacing, v.l_timeout];
-        let right_labels = [v.l_client_id, v.l_port, v.l_redirect];
+        let left_labels = [v.l_theme, v.l_accent, v.l_layout, v.l_concurrency, v.l_spacing, v.l_timeout];
+        let right_labels = [v.l_autolock, v.l_client_id, v.l_port, v.l_redirect];
         let mut left = flow(false, gap, column_w, label_column(hdc, &left_labels, gap, m.px(220)));
         flow_appearance(v, &mut left);
         flow_launching(v, &mut left);
         let right_x = gap + column_w + between;
         let mut right = flow(false, right_x, column_w, label_column(hdc, &right_labels, gap, m.px(220)));
+        flow_security(v, &mut right, configured, unlocked, master);
         flow_oauth(v, &mut right);
         flow_data(v, &mut right);
     }
@@ -430,7 +523,7 @@ pub fn refresh(app: &mut App) {
     let focus = ui::focused();
     app.settings.loading = true;
     let (v, s) = (&app.settings, &app.store.settings);
-    let theme_index = THEMES.iter().position(|(kind, _)| *kind == s.theme).unwrap_or(0);
+    let theme_index = ThemeKind::all().iter().position(|k| *k == s.theme).unwrap_or(0);
     ui::combo_select(v.theme, theme_index as i32);
     if focus != v.accent {
         ui::set_text_if_changed(v.accent, &accent_text(s.accent));
@@ -449,6 +542,33 @@ pub fn refresh(app: &mut App) {
         ui::set_text_if_changed(v.client_id, &s.oauth_client_id);
     }
     ui::set_text_if_changed(v.redirect, &oauth::redirect_uri(s.oauth_port));
+
+    let layout_index = i32::from(s.layout == ram_core::model::LayoutMode::Classic);
+    ui::combo_select(v.layout, layout_index);
+    ui::set_checked(v.direct, s.direct_launch);
+    ui::set_checked(v.multi, s.multi_instance);
+
+    let configured = app.vault_configured();
+    let unlocked = app.is_vault_unlocked();
+    let master = app.vault.mode() == Some(ram_core::vault::VaultMode::MasterPassword);
+    let status = app.vault_status_text();
+    let hello = app.vault.require_hello_reveal();
+    let autolock_min = app.vault.auto_lock_secs() / 60;
+    let v = &app.settings;
+    ui::set_text_if_changed(v.vault_status, &status);
+    ui::show(v.vault_setup, !configured);
+    ui::show(v.vault_unlock, configured && !unlocked);
+    ui::show(v.vault_lock, configured && unlocked);
+    ui::show(v.vault_change, configured && master);
+    ui::show(v.vault_remove, configured);
+    ui::show(v.vault_hello, configured);
+    ui::show(v.l_autolock, configured && master);
+    ui::show(v.autolock, configured && master);
+    ui::show(v.h_autolock, configured && master);
+    ui::set_checked(v.vault_hello, hello);
+    if focus != v.autolock {
+        ui::set_text_if_changed(v.autolock, &autolock_min.to_string());
+    }
     app.settings.loading = false;
 }
 
@@ -504,7 +624,7 @@ pub fn command(app: &mut App, id: u16, code: u16, _ctl: HWND) {
     }
     match (id, code) {
         (ID_THEME, CBN_SELCHANGE_CODE) => {
-            let picked = ui::combo_selected(app.settings.theme).and_then(|i| THEMES.get(i)).map(|(kind, _)| *kind);
+            let picked = ui::combo_selected(app.settings.theme).and_then(|i| ThemeKind::all().get(i)).copied();
             if let Some(kind) = picked.filter(|kind| *kind != app.store.settings.theme) {
                 app.store.settings.theme = kind;
                 apply_look(app);
@@ -548,6 +668,47 @@ pub fn command(app: &mut App, id: u16, code: u16, _ctl: HWND) {
             let report = diagnostics(app);
             copy_text(app, &report, "Diagnostics");
         }
+        (ID_LAYOUT, CBN_SELCHANGE_CODE) => {
+            let classic = ui::combo_selected(app.settings.layout) == Some(1);
+            let want = if classic { ram_core::model::LayoutMode::Classic } else { ram_core::model::LayoutMode::Modern };
+            if app.store.settings.layout != want {
+                app.store.settings.layout = want;
+                app.mark_dirty();
+                crate::accounts::refresh(app);
+            }
+        }
+        (ID_DIRECT, CLICKED) => {
+            app.store.settings.direct_launch = ui::is_checked(app.settings.direct);
+            app.mark_dirty();
+        }
+        (ID_MULTI, CLICKED) => {
+            app.store.settings.multi_instance = ui::is_checked(app.settings.multi);
+            app.mark_dirty();
+            app.apply_multi_instance();
+            app.set_status(if app.store.settings.multi_instance {
+                "Multi-instance on: several Roblox clients can run at once."
+            } else {
+                "Multi-instance off. Close Roblox before changing this to take effect."
+            });
+        }
+        (ID_VAULT_SETUP, CLICKED) => app.setup_vault_flow(),
+        (ID_VAULT_UNLOCK, CLICKED) => {
+            app.ensure_vault_unlocked();
+            refresh(app);
+        }
+        (ID_VAULT_LOCK, CLICKED) => app.lock_vault(),
+        (ID_VAULT_CHANGE, CLICKED) => app.change_master_password_flow(),
+        (ID_VAULT_REMOVE, CLICKED) => app.remove_vault_flow(),
+        (ID_VAULT_HELLO, CLICKED) => {
+            let on = ui::is_checked(app.settings.vault_hello);
+            app.set_require_hello(on);
+        }
+        (ID_VAULT_AUTOLOCK, EN_CHANGE_CODE) => {
+            if let Ok(min) = ui::get_text(app.settings.autolock).trim().parse::<u32>() {
+                app.set_auto_lock_minutes(min.min(1440));
+            }
+        }
+        (ID_EXPORT, CLICKED) => app.export_accounts_flow(),
         _ => {}
     }
 }
@@ -605,7 +766,7 @@ fn windows_build() -> Option<String> {
 fn diagnostics(app: &App) -> String {
     let (store, s) = (&app.store, &app.store.settings);
     let yes_no = |on: bool| if on { "yes" } else { "no" };
-    let mut lines = vec![format!("Waypoint {}", env!("CARGO_PKG_VERSION"))];
+    let mut lines = vec![format!("RAM {}", env!("CARGO_PKG_VERSION"))];
     if let Some(build) = windows_build() {
         lines.push(format!("Windows build {build}"));
     }

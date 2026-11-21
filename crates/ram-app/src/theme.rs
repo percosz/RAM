@@ -90,6 +90,40 @@ const LINEAGE: Palette = Palette {
     bad: rgb(0xD98A7A),
 };
 
+// Named palettes. Each is built from the palette author's own colours.
+const fn pal(dark: bool, window: u32, surface: u32, text: u32, muted: u32, border: u32, accent: u32, accent_text: u32, button: u32, button_hot: u32, good: u32, warn: u32, bad: u32) -> Palette {
+    Palette {
+        dark,
+        high_contrast: false,
+        window: rgb(window),
+        surface: rgb(surface),
+        text: rgb(text),
+        muted: rgb(muted),
+        border: rgb(border),
+        accent: rgb(accent),
+        accent_text: rgb(accent_text),
+        button: rgb(button),
+        button_hot: rgb(button_hot),
+        good: rgb(good),
+        warn: rgb(warn),
+        bad: rgb(bad),
+    }
+}
+
+// Catppuccin — https://github.com/catppuccin/catppuccin (MIT).
+const MOCHA: Palette = pal(true, 0x1E1E2E, 0x24243A, 0xCDD6F4, 0xA6ADC8, 0x45475A, 0xCBA6F7, 0x1E1E2E, 0x313244, 0x45475A, 0xA6E3A1, 0xF9E2AF, 0xF38BA8);
+const MACCHIATO: Palette = pal(true, 0x24273A, 0x2A2D43, 0xCAD3F5, 0xA5ADCB, 0x494D64, 0xC6A0F6, 0x24273A, 0x363A4F, 0x494D64, 0xA6DA95, 0xEED49F, 0xED8796);
+const FRAPPE: Palette = pal(true, 0x303446, 0x363A4C, 0xC6D0F5, 0xA5ADCE, 0x51576D, 0xCA9EE6, 0x303446, 0x414559, 0x51576D, 0xA6D189, 0xE5C890, 0xE78284);
+const LATTE: Palette = pal(false, 0xEFF1F5, 0xFFFFFF, 0x4C4F69, 0x6C6F85, 0xCCD0DA, 0x8839EF, 0xFFFFFF, 0xE6E9EF, 0xDCE0E8, 0x40A02B, 0xDF8E1D, 0xD20F39);
+// Nord — https://www.nordtheme.com (MIT).
+const NORD: Palette = pal(true, 0x2E3440, 0x343B4A, 0xECEFF4, 0xA6B0C0, 0x434C5E, 0x88C0D0, 0x2E3440, 0x3B4252, 0x434C5E, 0xA3BE8C, 0xEBCB8B, 0xBF616A);
+// Dracula — https://draculatheme.com (MIT).
+const DRACULA: Palette = pal(true, 0x282A36, 0x2E303E, 0xF8F8F2, 0x9AA2C4, 0x44475A, 0xBD93F9, 0x282A36, 0x343746, 0x44475A, 0x50FA7B, 0xF1FA8C, 0xFF5555);
+// Gruvbox — https://github.com/morhetz/gruvbox (MIT).
+const GRUVBOX: Palette = pal(true, 0x282828, 0x32302F, 0xEBDBB2, 0xA89984, 0x504945, 0xFE8019, 0x282828, 0x3C3836, 0x504945, 0xB8BB26, 0xFABD2F, 0xFB4934);
+// Rosé Pine — https://rosepinetheme.com (MIT). Pink accent, alyae-like.
+const ROSE_PINE: Palette = pal(true, 0x191724, 0x1F1D2E, 0xE0DEF4, 0x908CAA, 0x403D52, 0xEB6F92, 0x191724, 0x26233A, 0x403D52, 0x9CCFD8, 0xF6C177, 0xEB6F92);
+
 fn sys(index: SYS_COLOR_INDEX) -> u32 {
     unsafe { GetSysColor(index) }
 }
@@ -143,6 +177,14 @@ pub fn palette(settings: &Settings) -> Palette {
     let mut p = match settings.theme {
         ThemeKind::Light => LIGHT,
         ThemeKind::Dark => DARK,
+        ThemeKind::Mocha => MOCHA,
+        ThemeKind::Macchiato => MACCHIATO,
+        ThemeKind::Frappe => FRAPPE,
+        ThemeKind::Latte => LATTE,
+        ThemeKind::Nord => NORD,
+        ThemeKind::Dracula => DRACULA,
+        ThemeKind::Gruvbox => GRUVBOX,
+        ThemeKind::RosePine => ROSE_PINE,
         ThemeKind::Lineage => LINEAGE,
         ThemeKind::System => {
             if system_prefers_dark() {
@@ -276,52 +318,101 @@ pub enum ButtonKind {
     Nav(bool),
 }
 
-/// Paints an owner-drawn button, including a visible keyboard focus ring.
-pub fn draw_button(dis: &DRAWITEMSTRUCT, p: &Palette, kind: ButtonKind, font: HFONT) {
+/// Blends two COLORREFs: `t` percent of `a` over `b`.
+fn mix(a: u32, b: u32, t: u32) -> u32 {
+    let ch = |sh: u32| {
+        let (ca, cb) = ((a >> sh) & 0xff, (b >> sh) & 0xff);
+        ((ca * t + cb * (100 - t)) / 100) & 0xff
+    };
+    ch(0) | (ch(8) << 8) | (ch(16) << 16)
+}
+
+/// Fills a rounded rectangle with `fill`, outlined in `border` (equal to
+/// `fill` for no visible edge). `radius` of 0 draws square corners.
+unsafe fn round_rect(hdc: HDC, rc: RECT, radius: i32, fill: u32, border: u32) {
+    let brush = CreateSolidBrush(COLORREF(fill));
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(border));
+    let ob = SelectObject(hdc, brush.into());
+    let op = SelectObject(hdc, pen.into());
+    if radius > 0 {
+        let d = radius * 2;
+        let _ = RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, d, d);
+    } else {
+        let _ = Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+    }
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    let _ = DeleteObject(brush.into());
+    let _ = DeleteObject(pen.into());
+}
+
+/// Paints an owner-drawn button: rounded fills, a sidebar style for nav
+/// items, and a visible keyboard focus ring.
+pub fn draw_button(dis: &DRAWITEMSTRUCT, p: &Palette, kind: ButtonKind, font: HFONT, corner: i32) {
     unsafe {
         let hdc = dis.hDC;
         let rc = dis.rcItem;
         let pressed = (dis.itemState.0 & ODS_SELECTED.0) != 0;
         let disabled = (dis.itemState.0 & ODS_DISABLED.0) != 0;
         let focused = (dis.itemState.0 & ODS_FOCUS.0) != 0 && (dis.itemState.0 & ODS_NOFOCUSRECT.0) == 0;
-        let (bg, fg, border) = match kind {
-            ButtonKind::Accent if !disabled => (p.accent, p.accent_text, p.accent),
-            ButtonKind::Nav(true) => (p.window, p.text, p.window),
-            ButtonKind::Nav(false) => (p.window, p.muted, p.window),
-            _ => (if pressed { p.button_hot } else { p.button }, if disabled { p.muted } else { p.text }, p.border),
+        let radius = if p.high_contrast { 0 } else { corner };
+
+        // Clear to the surrounding colour (nav sits on the sidebar surface).
+        let surround = if matches!(kind, ButtonKind::Nav(_)) { p.surface } else { p.window };
+        let clear = CreateSolidBrush(COLORREF(surround));
+        FillRect(hdc, &rc, clear);
+        let _ = DeleteObject(clear.into());
+
+        let (fg, left_align) = match kind {
+            ButtonKind::Nav(active) => {
+                if active {
+                    let wash = if p.dark { mix(p.accent, p.surface, 24) } else { mix(p.accent, p.surface, 16) };
+                    round_rect(hdc, rc, radius, wash, wash);
+                    let bar = RECT { left: rc.left, right: rc.left + 3, top: rc.top + 3, bottom: rc.bottom - 3 };
+                    let accent = CreateSolidBrush(COLORREF(p.accent));
+                    FillRect(hdc, &bar, accent);
+                    let _ = DeleteObject(accent.into());
+                    (p.text, true)
+                } else if pressed {
+                    round_rect(hdc, rc, radius, mix(p.text, p.surface, 8), mix(p.text, p.surface, 8));
+                    (p.text, true)
+                } else {
+                    (p.muted, true)
+                }
+            }
+            ButtonKind::Accent if !disabled => {
+                let bg = if pressed { mix(p.accent, 0, 85) } else { p.accent };
+                round_rect(hdc, rc, radius, bg, bg);
+                (p.accent_text, false)
+            }
+            _ => {
+                let bg = if pressed { p.button_hot } else { p.button };
+                round_rect(hdc, rc, radius, bg, p.border);
+                (if disabled { p.muted } else { p.text }, false)
+            }
         };
-        let brush = CreateSolidBrush(COLORREF(if pressed && kind == ButtonKind::Accent { p.border } else { bg }));
-        let pen = CreatePen(PS_SOLID, 1, COLORREF(border));
-        let old_brush = SelectObject(hdc, brush.into());
-        let old_pen = SelectObject(hdc, pen.into());
-        let _ = Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
-        if let ButtonKind::Nav(true) = kind {
-            // Current view marker: a short accent bar under the label.
-            let bar = RECT { left: rc.left + 6, right: rc.right - 6, top: rc.bottom - 3, bottom: rc.bottom };
-            let accent = CreateSolidBrush(COLORREF(p.accent));
-            FillRect(hdc, &bar, accent);
-            let _ = DeleteObject(accent.into());
-        }
-        let hwnd = dis.hwndItem;
-        let text = ui::get_text(hwnd);
+
+        let text = ui::get_text(dis.hwndItem);
         let mut wtext: Vec<u16> = text.encode_utf16().collect();
         let old_font = SelectObject(hdc, font.into());
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, COLORREF(fg));
         let mut trc = rc;
-        DrawTextW(hdc, &mut wtext, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        let flags = if left_align {
+            trc.left += (rc.bottom - rc.top) / 2;
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS
+        } else {
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS
+        };
+        DrawTextW(hdc, &mut wtext, &mut trc, flags);
         if focused {
             let mut frc = rc;
             let _ = InflateRect(&mut frc, -3, -3);
             SetTextColor(hdc, COLORREF(p.text));
-            SetBkColor(hdc, COLORREF(bg));
+            SetBkColor(hdc, COLORREF(surround));
             let _ = DrawFocusRect(hdc, &frc);
         }
         SelectObject(hdc, old_font);
-        SelectObject(hdc, old_brush);
-        SelectObject(hdc, old_pen);
-        let _ = DeleteObject(brush.into());
-        let _ = DeleteObject(pen.into());
     }
 }
 

@@ -17,7 +17,10 @@ use ram_core::redact::Log;
 use ram_core::search::SearchIndex;
 use ram_core::signin::{self, CheckOutcome};
 use ram_core::store::StoreFile;
-use ram_win::{ExitWatcher, TrayNotifier, WinBrowsers, WinHttp, WinJobs, WinProcesses, WinSecrets, WinWindows, WindowShowHook};
+use ram_core::vault::Vault;
+use ram_core::{roblox, vault};
+use crate::vaultsvc::{WinEntropy, WinProtector};
+use ram_win::{ExitWatcher, SingletonHold, TrayNotifier, WinBrowsers, WinHttp, WinJobs, WinProcesses, WinSecrets, WinWindows, WindowShowHook};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -33,6 +36,7 @@ pub const WM_PROC_EXIT: u32 = WM_APP + 1;
 pub const WM_PROC_SHOW: u32 = WM_APP + 2;
 pub const WM_CHECK_DONE: u32 = WM_APP + 3;
 pub const WM_TRAY: u32 = WM_APP + 4;
+pub const WM_LAUNCH_DONE: u32 = WM_APP + 5;
 
 pub const TIMER_SAVE: usize = 1;
 pub const TIMER_QUEUE: usize = 2;
@@ -40,9 +44,22 @@ pub const TIMER_SAMPLE: usize = 3;
 pub const TIMER_RESCAN: usize = 4;
 pub const TIMER_SEARCH: usize = 5;
 pub const TIMER_DETAILS: usize = 6;
+pub const TIMER_VAULT: usize = 7;
+
+/// Whether an account has a stored session cookie in the vault.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CookieState {
+    /// No vault is set up at all.
+    NoVault,
+    /// A cookie is stored for this account.
+    Stored,
+    /// No cookie stored for this account.
+    Missing,
+}
 
 pub const ID_NAV_FIRST: u16 = 101;
 pub const ID_STATUS: u16 = 110;
+pub const ID_TITLE: u16 = 111;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ViewId {
@@ -73,6 +90,35 @@ pub struct CheckDone {
     pub result: Result<CheckResult, String>,
 }
 
+/// Outcome of a direct launch's ticket preparation.
+pub enum Launched {
+    /// The stored cookie was rejected by Roblox.
+    Unauthorized,
+    /// A displayable, inconclusive reason.
+    Message(String),
+}
+
+/// Result a worker thread posts back with WM_LAUNCH_DONE: the built launch
+/// URI, or why it could not be built.
+pub struct LaunchDone {
+    pub account: AccountId,
+    pub target: Target,
+    pub result: Result<String, Launched>,
+}
+
+fn launch_error_message(e: &roblox::LaunchError) -> Launched {
+    use roblox::LaunchError::*;
+    match e {
+        Unauthorized => Launched::Unauthorized,
+        Offline => Launched::Message("this PC appears to be offline".into()),
+        Timeout => Launched::Message("the request to Roblox timed out".into()),
+        RateLimited { retry_after_secs: Some(s) } => Launched::Message(format!("Roblox rate limit; retry in {s} s")),
+        RateLimited { retry_after_secs: None } => Launched::Message("Roblox rate limit".into()),
+        Service { status } => Launched::Message(format!("Roblox returned HTTP {status}")),
+        Malformed => Launched::Message("Roblox returned an unexpected response".into()),
+    }
+}
+
 pub struct App {
     pub hwnd: HWND,
     pub data_dir: PathBuf,
@@ -95,6 +141,8 @@ pub struct App {
     pub view: ViewId,
     pub nav: [HWND; 4],
     pub status: HWND,
+    /// App name shown at the top of the sidebar.
+    pub title: HWND,
     pub panels: [HWND; 4],
     pub accounts: accounts::AccountsView,
     pub destinations: destinations::DestinationsView,
@@ -115,6 +163,12 @@ pub struct App {
     /// True when some client could not be opened for an exit wait, so a
     /// slow poll has to notice its exit instead.
     pub unwatched: bool,
+    /// Encrypted store of session cookies.
+    pub vault: Vault,
+    pub entropy: WinEntropy,
+    pub protector: WinProtector,
+    /// Held while multi-instance is on, so several clients can run.
+    pub singleton: Option<SingletonHold>,
 }
 
 thread_local! {
@@ -241,20 +295,462 @@ impl App {
 
     // ---- verified sign-in checks -----------------------------------------
 
-    /// Runs a verified check on a worker thread.
+    /// Runs a verified check on a worker thread. When the vault is unlocked
+    /// and holds a cookie, the cookie confirms the account directly;
+    /// otherwise the optional OAuth check is used.
     pub fn check_sign_in(&mut self, account: AccountId) {
         if self.checking.contains(&account) {
             return;
         }
-        let client_id = self.store.settings.oauth_client_id.trim().to_string();
         let expected = self.store.account(account).and_then(|a| a.roblox_user_id);
+        let cookie = if self.vault.is_unlocked() {
+            self.vault.secret(account).ok().flatten().map(|z| z.to_string())
+        } else {
+            None
+        };
         self.checking.push(account);
         let hwnd = self.hwnd.0 as isize;
-        std::thread::spawn(move || {
-            let result = oauth::check_account(&WinHttp::new(), &WinSecrets::new(), &client_id, account, expected);
-            post_done(hwnd, CheckDone { account, result: Ok(result) });
-        });
+        if let Some(cookie) = cookie {
+            std::thread::spawn(move || {
+                let result = match roblox::whoami(&WinHttp::new(), &cookie) {
+                    Ok(u) => {
+                        let outcome = match expected {
+                            Some(exp) if exp != u.id => CheckOutcome::DifferentAccount { username: u.name.clone() },
+                            _ => CheckOutcome::Confirmed,
+                        };
+                        oauth::CheckResult {
+                            outcome,
+                            identity: Some(oauth::UserInfo { user_id: u.id, username: u.name }),
+                        }
+                    }
+                    Err(e) => oauth::CheckResult { outcome: e.to_sign_in_outcome(), identity: None },
+                };
+                post_done(hwnd, CheckDone { account, result: Ok(result) });
+            });
+        } else {
+            let client_id = self.store.settings.oauth_client_id.trim().to_string();
+            std::thread::spawn(move || {
+                let result = oauth::check_account(&WinHttp::new(), &WinSecrets::new(), &client_id, account, expected);
+                post_done(hwnd, CheckDone { account, result: Ok(result) });
+            });
+        }
         accounts::refresh_rows(self);
+    }
+
+    // ---- vault & cookies -------------------------------------------------
+
+    pub fn vault_configured(&self) -> bool {
+        self.vault.is_configured()
+    }
+
+    pub fn is_vault_unlocked(&self) -> bool {
+        self.vault.is_unlocked()
+    }
+
+    pub fn cookie_state(&self, account: AccountId) -> CookieState {
+        if !self.vault.is_configured() {
+            CookieState::NoVault
+        } else if self.vault.has_secret(account) {
+            CookieState::Stored
+        } else {
+            CookieState::Missing
+        }
+    }
+
+    /// Ensures the vault is unlocked, running the unlock flow if needed.
+    pub fn ensure_vault_unlocked(&mut self) -> bool {
+        if !self.vault.is_configured() {
+            self.set_status("Set up the cookie vault in Settings \u{2192} Security first.");
+            return false;
+        }
+        if self.vault.is_unlocked() {
+            self.vault.touch(now());
+            return true;
+        }
+        match self.vault.mode() {
+            Some(vault::VaultMode::Dpapi) => match self.vault.unlock_dpapi(&self.protector, now()) {
+                Ok(()) => {
+                    self.update_timers();
+                    true
+                }
+                Err(e) => {
+                    self.set_status(&format!("Could not unlock the vault: {e}"));
+                    false
+                }
+            },
+            Some(vault::VaultMode::MasterPassword) => {
+                let pw = crate::dialogs::prompt_secret(
+                    self.hwnd,
+                    "Unlock vault",
+                    "Enter your master password to unlock the cookie vault.",
+                    "Master password",
+                    "Unlock",
+                    &|p| if p.is_empty() { Err("Enter your password.".into()) } else { Ok(()) },
+                );
+                match pw {
+                    Some(pw) => match self.vault.unlock_password(&pw, now()) {
+                        Ok(()) => {
+                            self.set_status("Vault unlocked.");
+                            self.update_timers();
+                            accounts::refresh_rows(self);
+                            true
+                        }
+                        Err(e) => {
+                            self.set_status(&format!("{e}"));
+                            false
+                        }
+                    },
+                    None => false,
+                }
+            }
+            None => false,
+        }
+    }
+
+    /// Prompts for a cookie and stores it in the vault for an account.
+    pub fn set_cookie(&mut self, account: AccountId) {
+        if !self.ensure_vault_unlocked() {
+            return;
+        }
+        let name = self.account_name(account);
+        let cookie = crate::dialogs::prompt_secret(
+            self.hwnd,
+            &format!("Store cookie for {name}"),
+            "Paste this account's .ROBLOSECURITY cookie. It is encrypted in the vault and never written to the plain data file or the log. Get it from your browser's cookies for roblox.com while signed in to this account.",
+            ".ROBLOSECURITY",
+            "Store",
+            &|c| {
+                let c = c.trim();
+                if c.len() < 32 {
+                    Err("That does not look like a .ROBLOSECURITY cookie.".into())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        let Some(cookie) = cookie else { return };
+        match self.vault.set_secret(account, cookie.trim(), &self.entropy, now()) {
+            Ok(()) => {
+                self.set_status(&format!("Cookie stored for {name}. Checking sign-in\u{2026}"));
+                self.check_sign_in(account);
+            }
+            Err(e) => self.set_status(&format!("Could not store the cookie: {e}")),
+        }
+        accounts::refresh_rows(self);
+    }
+
+    /// Confirms with Windows Hello or the master password before a reveal or
+    /// copy. DPAPI vaults with no Hello fall through, since Windows already
+    /// gated them at sign-in.
+    fn gate_reveal(&mut self) -> bool {
+        if self.vault.require_hello_reveal() && ram_win::hello::is_available() {
+            return match crate::vaultsvc::hello_confirm("Confirm to reveal a Roblox session cookie") {
+                Ok(v) => v,
+                Err(_) => self.gate_with_password(),
+            };
+        }
+        if self.vault.mode() == Some(vault::VaultMode::MasterPassword) {
+            return self.gate_with_password();
+        }
+        true
+    }
+
+    fn gate_with_password(&mut self) -> bool {
+        if self.vault.mode() != Some(vault::VaultMode::MasterPassword) {
+            return true;
+        }
+        let pw = crate::dialogs::prompt_secret(
+            self.hwnd,
+            "Confirm",
+            "Enter your master password to reveal this cookie.",
+            "Master password",
+            "Confirm",
+            &|p| if p.is_empty() { Err("Enter your password.".into()) } else { Ok(()) },
+        );
+        match pw {
+            Some(pw) if self.vault.verify_password(&pw) => true,
+            Some(_) => {
+                self.set_status("Incorrect master password.");
+                false
+            }
+            None => false,
+        }
+    }
+
+    pub fn reveal_cookie(&mut self, account: AccountId) {
+        if !self.ensure_vault_unlocked() || !self.gate_reveal() {
+            return;
+        }
+        match self.vault.secret(account) {
+            Ok(Some(cookie)) => {
+                crate::dialogs::show_secret(
+                    self.hwnd,
+                    &format!("Cookie for {}", self.account_name(account)),
+                    "Keep this secret: anyone with it can sign in as this account. Copy closes this window.",
+                    &cookie,
+                );
+                self.set_status("");
+            }
+            Ok(None) => self.set_status("No cookie is stored for this account."),
+            Err(e) => self.set_status(&format!("{e}")),
+        }
+    }
+
+    pub fn copy_cookie(&mut self, account: AccountId) {
+        if !self.ensure_vault_unlocked() || !self.gate_reveal() {
+            return;
+        }
+        match self.vault.secret(account) {
+            Ok(Some(cookie)) => {
+                if ui::copy_to_clipboard(self.hwnd, &cookie) {
+                    self.set_status("Cookie copied to the clipboard. Clear it when you are done.");
+                } else {
+                    self.set_status("Could not copy the cookie.");
+                }
+            }
+            Ok(None) => self.set_status("No cookie is stored for this account."),
+            Err(e) => self.set_status(&format!("{e}")),
+        }
+    }
+
+    pub fn remove_cookie(&mut self, account: AccountId) {
+        let name = self.account_name(account);
+        if !ui::confirm(self.hwnd, "Remove cookie", &format!("Remove the stored cookie for {name}? The account stays in the list; only the saved cookie is deleted from this PC.")) {
+            return;
+        }
+        match self.vault.remove_secret(account) {
+            Ok(()) => self.set_status(&format!("Cookie removed for {name}.")),
+            Err(e) => self.set_status(&format!("{e}")),
+        }
+        accounts::refresh_rows(self);
+    }
+
+    /// A one-line summary of the vault state for the Settings screen.
+    pub fn vault_status_text(&self) -> String {
+        if !self.vault.is_configured() {
+            return "Not set up. Stored cookies let RAM launch and verify accounts without a browser.".to_string();
+        }
+        let count = self.vault.accounts_with_secret().len();
+        let cookies = format!("{count} cookie{}", if count == 1 { "" } else { "s" });
+        match self.vault.mode() {
+            Some(vault::VaultMode::Dpapi) => format!("Windows account (DPAPI), unlocked \u{00B7} {cookies}."),
+            Some(vault::VaultMode::MasterPassword) => {
+                let state = if self.vault.is_unlocked() { "unlocked" } else { "locked" };
+                format!("Master password, {state} \u{00B7} {cookies}.")
+            }
+            None => cookies,
+        }
+    }
+
+    /// Guides the user through setting up the vault for the first time.
+    pub fn setup_vault_flow(&mut self) {
+        if self.vault.is_configured() {
+            self.set_status("A cookie vault is already set up.");
+            return;
+        }
+        let choice = crate::dialogs::choose(
+            self.hwnd,
+            "Set up cookie vault",
+            "Choose how to protect stored session cookies.",
+            "Continue",
+            &[
+                "Windows account (DPAPI) \u{2014} unlocks automatically for you, no password".to_string(),
+                "Master password \u{2014} Argon2id + AES-256-GCM, auto-lock, recovery code".to_string(),
+            ],
+        );
+        match choice {
+            Some(0) => match self.vault.setup_dpapi(&self.entropy, &self.protector, 0) {
+                Ok(()) => self.set_status("Cookie vault set up. Reveal and copy are gated by Windows Hello when it is available."),
+                Err(e) => self.set_status(&format!("Could not set up the vault: {e}")),
+            },
+            Some(1) => self.setup_master_password_flow(),
+            _ => {}
+        }
+        settings::refresh(self);
+        accounts::refresh_rows(self);
+    }
+
+    fn setup_master_password_flow(&mut self) {
+        let pw = crate::dialogs::prompt_secret(
+            self.hwnd,
+            "Set master password",
+            "Choose a master password for the cookie vault. If you forget it, only the recovery code can restore access.",
+            "Master password",
+            "Continue",
+            &|p| if p.len() < 8 { Err("Use at least 8 characters.".into()) } else { Ok(()) },
+        );
+        let Some(pw) = pw else { return };
+        let confirm = crate::dialogs::prompt_secret(
+            self.hwnd,
+            "Confirm password",
+            "Enter the same master password again.",
+            "Master password",
+            "Set up",
+            &|_| Ok(()),
+        );
+        if confirm.as_deref() != Some(pw.as_str()) {
+            self.set_status("The passwords did not match. Nothing was changed.");
+            return;
+        }
+        match self.vault.setup_master_password(&pw, &self.entropy, 15 * 60) {
+            Ok(recovery) => {
+                self.show_recovery_code(recovery);
+                unsafe {
+                    SetTimer(Some(self.hwnd), TIMER_VAULT, 20_000, None);
+                }
+                self.set_status("Cookie vault set up. It locks after 15 minutes idle.");
+            }
+            Err(e) => self.set_status(&format!("Could not set up the vault: {e}")),
+        }
+    }
+
+    fn show_recovery_code(&mut self, recovery: vault::RecoveryCode) {
+        crate::dialogs::show_secret(
+            self.hwnd,
+            "Recovery code",
+            "Save this code somewhere safe. It is the only way to unlock the vault if you forget the master password, and it is shown only once. Copy closes this window.",
+            recovery.display(),
+        );
+    }
+
+    pub fn lock_vault(&mut self) {
+        self.vault.lock();
+        self.set_status("Vault locked.");
+        settings::refresh(self);
+        accounts::refresh_rows(self);
+    }
+
+    pub fn change_master_password_flow(&mut self) {
+        if self.vault.mode() != Some(vault::VaultMode::MasterPassword) {
+            return;
+        }
+        if !self.ensure_vault_unlocked() {
+            return;
+        }
+        let pw = crate::dialogs::prompt_secret(
+            self.hwnd,
+            "Change master password",
+            "Choose a new master password. A fresh recovery code will be shown.",
+            "New password",
+            "Continue",
+            &|p| if p.len() < 8 { Err("Use at least 8 characters.".into()) } else { Ok(()) },
+        );
+        let Some(pw) = pw else { return };
+        match self.vault.change_master_password(&pw, &self.entropy) {
+            Ok(recovery) => {
+                self.show_recovery_code(recovery);
+                self.set_status("Master password changed.");
+            }
+            Err(e) => self.set_status(&format!("{e}")),
+        }
+        settings::refresh(self);
+    }
+
+    pub fn remove_vault_flow(&mut self) {
+        if !self.vault.is_configured() {
+            return;
+        }
+        let n = self.vault.accounts_with_secret().len();
+        if !ui::confirm(
+            self.hwnd,
+            "Remove vault",
+            &format!(
+                "Delete the cookie vault and all {n} stored cookie(s) from this PC? This cannot be undone. The accounts stay in the list and the Roblox sessions are not affected."
+            ),
+        ) {
+            return;
+        }
+        match self.vault.destroy() {
+            Ok(()) => self.set_status("Cookie vault removed."),
+            Err(e) => self.set_status(&format!("{e}")),
+        }
+        settings::refresh(self);
+        accounts::refresh_rows(self);
+    }
+
+    pub fn set_require_hello(&mut self, on: bool) {
+        if let Err(e) = self.vault.set_require_hello_reveal(on) {
+            self.set_status(&format!("{e}"));
+        }
+    }
+
+    pub fn set_auto_lock_minutes(&mut self, minutes: u32) {
+        if let Err(e) = self.vault.set_auto_lock_secs(minutes.saturating_mul(60)) {
+            self.set_status(&format!("{e}"));
+        }
+    }
+
+    /// Exports accounts to a legacy `AccountData.json`, optionally including
+    /// the stored cookies (which requires unlocking the vault).
+    pub fn export_accounts_flow(&mut self) {
+        use ram_core::export::{self, ExportEncryption, ExportOptions};
+        let ids: Vec<AccountId> = self.store.accounts.iter().map(|a| a.id).collect();
+        if ids.is_empty() {
+            self.set_status("There are no accounts to export.");
+            return;
+        }
+        let with_cookies = self.vault.is_configured()
+            && ui::message_box(
+                self.hwnd,
+                "Export",
+                "Include stored session cookies in the export?\n\nYes writes an encrypted AccountData.json that another manager can sign in with. No exports names and settings only.",
+                MB_YESNO | MB_ICONQUESTION,
+            ) == IDYES;
+        if with_cookies && !self.ensure_vault_unlocked() {
+            return;
+        }
+        let Some(dir) = crate::dialogs::pick_folder(self.hwnd, "Choose a folder for AccountData.json") else {
+            return;
+        };
+        // Cookies come from the (unlocked) vault; collect them up front.
+        let mut cookies: HashMap<AccountId, String> = HashMap::new();
+        if with_cookies {
+            for id in &ids {
+                if let Ok(Some(c)) = self.vault.secret(*id) {
+                    cookies.insert(*id, c.to_string());
+                }
+            }
+        }
+        let opts = ExportOptions {
+            encryption: if with_cookies { ExportEncryption::Dpapi } else { ExportEncryption::Plaintext },
+            include_cookies: with_cookies,
+        };
+        let protector = crate::vaultsvc::LegacyDpapi;
+        let cookie_of = |id: AccountId| cookies.get(&id).cloned();
+        match export::export(&self.store, &ids, &cookie_of, &opts, Some(&protector)) {
+            Ok((bytes, summary)) => {
+                let path = dir.join("AccountData.json");
+                match std::fs::write(&path, &bytes) {
+                    Ok(()) => self.set_status(&format!(
+                        "Exported {} account(s), {} with a cookie, to {}.",
+                        summary.accounts,
+                        summary.with_cookie,
+                        path.display()
+                    )),
+                    Err(e) => self.set_status(&format!("Could not write the file: {e}")),
+                }
+            }
+            Err(e) => self.set_status(&format!("Export failed: {e}")),
+        }
+    }
+
+    /// Applies or releases the Roblox singleton hold for multi-instance.
+    pub fn apply_multi_instance(&mut self) {
+        if self.store.settings.multi_instance {
+            if self.singleton.is_none() {
+                match ram_win::multi_instance::hold() {
+                    Ok(h) => {
+                        if !h.is_held() {
+                            self.log("multi-instance: another process already holds the Roblox singleton");
+                        }
+                        self.singleton = Some(h);
+                    }
+                    Err(e) => self.log(&format!("multi-instance unavailable: {e}")),
+                }
+            }
+        } else {
+            self.singleton = None;
+        }
     }
 
     /// Starts an OAuth authorization in the account's browser profile and
@@ -353,23 +849,19 @@ impl App {
         let s = &self.store.settings;
         let handoffs = self.clients.next_handoffs(now(), s.launch_concurrency, s.launch_spacing_secs);
         for h in handoffs {
+            if self.start_direct_launch(&h) {
+                continue;
+            }
+            // Browser hand-off: open the join link in the account's profile.
             let url = links::launch_url(&h.target);
             match self.open_for(h.account, &url) {
                 Ok(()) => {
-                    let t = now();
-                    if let Some(a) = self.store.account_mut(h.account) {
-                        a.last_used = Some(t);
-                    }
-                    self.store.push_recent(RecentLaunch { account: h.account, target: h.target.clone(), at: t });
-                    if let Some(d) = self.store.destinations.iter_mut().find(|d| d.target == h.target) {
-                        d.last_used = Some(t);
-                    }
+                    self.record_launch(h.account, &h.target);
                     self.set_status(&format!(
-                        "Handed {} to the browser for {}. Waiting for a client…",
+                        "Handed {} to the browser for {}. Waiting for a client\u{2026}",
                         links::describe(&h.target),
                         self.account_name(h.account)
                     ));
-                    self.mark_dirty();
                 }
                 Err(e) => {
                     self.clients.handoff_failed(h.account, &e);
@@ -382,6 +874,93 @@ impl App {
         if self.view == ViewId::Destinations {
             destinations::refresh(self);
         }
+    }
+
+    /// Records a launch against the account, destination and recent history.
+    fn record_launch(&mut self, account: AccountId, target: &Target) {
+        let t = now();
+        if let Some(a) = self.store.account_mut(account) {
+            a.last_used = Some(t);
+        }
+        self.store.push_recent(RecentLaunch { account, target: target.clone(), at: t });
+        if let Some(d) = self.store.destinations.iter_mut().find(|d| d.target == *target) {
+            d.last_used = Some(t);
+        }
+        self.mark_dirty();
+    }
+
+    /// Starts a direct (ticket-based) launch on a worker thread when direct
+    /// launch is enabled, the vault is unlocked, a cookie is stored, and the
+    /// target can be served by a ticket. Returns true when that path is
+    /// taken; otherwise the caller falls back to the browser.
+    fn start_direct_launch(&mut self, h: &ram_core::clients::Handoff) -> bool {
+        if !self.store.settings.direct_launch {
+            return false;
+        }
+        let Some(target) = roblox::launch_target(&h.target) else {
+            return false;
+        };
+        if !self.vault.is_unlocked() {
+            return false;
+        }
+        let cookie = match self.vault.secret(h.account) {
+            Ok(Some(c)) => c.to_string(),
+            _ => return false,
+        };
+        self.vault.touch(now());
+        let name = self.account_name(h.account);
+        self.set_status(&format!("Launching {} directly for {}\u{2026}", links::describe(&h.target), name));
+        let hwnd = self.hwnd.0 as isize;
+        let (account, model_target) = (h.account, h.target.clone());
+        std::thread::spawn(move || {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            let result = roblox::prepare_launch(&WinHttp::new(), &cookie, &target, None, now_ms)
+                .map(|(uri, _btid)| uri)
+                .map_err(|e| launch_error_message(&e));
+            post_launch_done(hwnd, LaunchDone { account, target: model_target, result });
+        });
+        true
+    }
+
+    pub fn on_launch_done(&mut self, done: LaunchDone) {
+        let name = self.account_name(done.account);
+        match done.result {
+            Ok(uri) => match ram_win::launch::launch_protocol(&uri) {
+                Ok(()) => {
+                    self.record_launch(done.account, &done.target);
+                    self.set_status(&format!("Launching {} for {}\u{2026}", links::describe(&done.target), name));
+                }
+                Err(e) => {
+                    let msg = format!("Could not start the Roblox client: {e}.");
+                    self.clients.handoff_failed(done.account, &msg);
+                    self.set_status(&msg);
+                }
+            },
+            Err(Launched::Unauthorized) => {
+                // The cookie is invalid; record it and fall back to the browser.
+                if let Some(a) = self.store.account_mut(done.account) {
+                    signin::apply(&mut a.sign_in, &CheckOutcome::AuthorizationRejected, now());
+                }
+                self.set_status(&format!("{name}: the stored cookie is no longer valid. Opening the browser instead."));
+                let url = links::launch_url(&done.target);
+                match self.open_for(done.account, &url) {
+                    Ok(()) => self.record_launch(done.account, &done.target),
+                    Err(e) => {
+                        self.clients.handoff_failed(done.account, &e);
+                        self.set_status(&e);
+                    }
+                }
+            }
+            Err(Launched::Message(msg)) => {
+                self.clients.handoff_failed(done.account, &msg);
+                self.set_status(&format!("{name}: {msg}"));
+            }
+        }
+        self.update_timers();
+        accounts::refresh_rows(self);
     }
 
     /// Forgets the saved authorization for an account and asks Roblox to
@@ -565,7 +1144,7 @@ impl App {
     pub fn notify(&mut self, title: &str, body: &str) {
         if self.tray.is_none() {
             let icon = unsafe { LoadIconW(None, IDI_APPLICATION).map(|i| i.0 as isize).unwrap_or(0) };
-            self.tray = Some(TrayNotifier::new(self.hwnd.0 as isize, icon, WM_TRAY, "Waypoint"));
+            self.tray = Some(TrayNotifier::new(self.hwnd.0 as isize, icon, WM_TRAY, "RAM"));
         }
         if let Some(t) = &self.tray {
             t.notify(title, body);
@@ -660,23 +1239,33 @@ impl App {
         ui::focus(first);
     }
 
+    /// Width of the left navigation sidebar.
+    pub fn sidebar_w(&self) -> i32 {
+        self.m.px(if self.m.compact { 150 } else { 174 })
+    }
+
     pub fn layout(&mut self) {
         let rc = ui::client_rect(self.hwnd);
         let m = &self.m;
         let (gap, row) = (m.gap(), m.row());
-        let nav_h = row + m.px(6);
-        let mut x = gap;
-        for (i, h) in self.nav.iter().enumerate() {
-            let w = m.px(if i == 1 || i == 2 { 116 } else { 92 });
-            ui::place(*h, x, gap / 2, w, nav_h);
-            x += w + m.px(2);
+        let side = self.sidebar_w();
+        // Left sidebar: the app title sits above the stacked nav items.
+        let item_h = row + m.px(8);
+        let pad = m.px(8);
+        ui::place(self.title, pad + m.px(4), m.px(14), side - 2 * pad, row);
+        let mut y = m.px(16) + row;
+        for h in self.nav.iter() {
+            ui::place(*h, pad, y, side - 2 * pad, item_h);
+            y += item_h + m.px(2);
         }
+        // Content area to the right of the sidebar.
+        let content_x = side;
         let status_h = row;
-        ui::place(self.status, gap, rc.bottom - status_h, rc.right - 2 * gap, status_h - m.px(4));
-        let top = nav_h + gap;
-        let (w, h) = (rc.right, rc.bottom - top - status_h);
+        ui::place(self.status, content_x + gap, rc.bottom - status_h, rc.right - content_x - 2 * gap, status_h - m.px(4));
+        let top = gap;
+        let (w, h) = (rc.right - content_x, rc.bottom - top - status_h);
         for p in self.panels {
-            ui::place(p, 0, top, w, h);
+            ui::place(p, content_x, top, w, h);
         }
         if self.created[0] {
             accounts::layout(self);
@@ -705,6 +1294,8 @@ impl App {
         }
         theme::apply_to_frame(self.hwnd, &self.palette);
         theme::apply_to_tree(self.hwnd, &self.palette);
+        // The sidebar title is always bold.
+        ui::send(self.title, WM_SETFONT, self.m.font_bold.0 as usize, 1);
         for list in [self.accounts.list, self.destinations.list, self.performance.list] {
             ui::list_set_row_height(list, self.m.list_row());
         }
@@ -723,6 +1314,11 @@ impl App {
                 let ctl = HWND(lparam.0 as *mut _);
                 let id = GetDlgCtrlID(ctl) as u16;
                 SetBkMode(hdc, TRANSPARENT);
+                // The title sits on the surface-coloured sidebar.
+                if id == ID_TITLE {
+                    SetTextColor(hdc, COLORREF(self.palette.accent));
+                    return Some(LRESULT(self.brushes.surface.0 as isize));
+                }
                 let color = match self.static_tone(id) {
                     Tone::Text => self.palette.text,
                     Tone::Muted => self.palette.muted,
@@ -753,7 +1349,8 @@ impl App {
                     ButtonKind::Normal
                 };
                 let font = if matches!(kind, ButtonKind::Nav(true)) { self.m.font_bold } else { self.m.font };
-                theme::draw_button(dis, &self.palette, kind, font);
+                let corner = self.m.px(self.store.settings.corner_radius.clamp(0, 16));
+                theme::draw_button(dis, &self.palette, kind, font, corner);
                 Some(LRESULT(1))
             },
             _ => None,
@@ -861,6 +1458,15 @@ fn post_done(hwnd: isize, done: CheckDone) {
     let ptr = Box::into_raw(Box::new(done));
     unsafe {
         if PostMessageW(Some(HWND(hwnd as *mut _)), WM_CHECK_DONE, WPARAM(0), LPARAM(ptr as isize)).is_err() {
+            drop(Box::from_raw(ptr));
+        }
+    }
+}
+
+fn post_launch_done(hwnd: isize, done: LaunchDone) {
+    let ptr = Box::into_raw(Box::new(done));
+    unsafe {
+        if PostMessageW(Some(HWND(hwnd as *mut _)), WM_LAUNCH_DONE, WPARAM(0), LPARAM(ptr as isize)).is_err() {
             drop(Box::from_raw(ptr));
         }
     }

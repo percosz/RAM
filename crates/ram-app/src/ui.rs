@@ -219,6 +219,41 @@ pub fn edit(parent: HWND, id: u16) -> HWND {
     create(w!("EDIT"), "", WS_TABSTOP.0 | WS_BORDER.0 | ES_AUTOHSCROLL as u32, 0, parent, id)
 }
 
+/// A single-line edit that masks its characters, for passwords.
+pub fn edit_password(parent: HWND, id: u16) -> HWND {
+    create(w!("EDIT"), "", WS_TABSTOP.0 | WS_BORDER.0 | (ES_AUTOHSCROLL | ES_PASSWORD) as u32, 0, parent, id)
+}
+
+/// Copies text to the clipboard through a throwaway edit control and
+/// `WM_COPY`, so no extra clipboard features are needed. Returns true on
+/// success.
+pub fn copy_to_clipboard(parent: HWND, text: &str) -> bool {
+    unsafe {
+        let edit = CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("EDIT"),
+            PCWSTR(wide(text).as_ptr()),
+            WS_CHILD | WINDOW_STYLE(ES_MULTILINE as u32),
+            0,
+            0,
+            0,
+            0,
+            Some(parent),
+            None,
+            Some(hinstance()),
+            None,
+        )
+        .unwrap_or_default();
+        if edit.is_invalid() {
+            return false;
+        }
+        send(edit, EM_SETSEL, 0, -1);
+        let ok = send(edit, WM_COPY, 0, 0);
+        let _ = DestroyWindow(edit);
+        ok != 0
+    }
+}
+
 pub fn edit_multiline(parent: HWND, id: u16) -> HWND {
     create(
         w!("EDIT"),

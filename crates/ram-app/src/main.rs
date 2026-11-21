@@ -1,8 +1,10 @@
-//! Waypoint: a Windows account manager for Roblox that hands sign-in and
+//! RAM: a Windows account manager for Roblox that hands sign-in and
 //! launching to the user's browser and stores no credentials.
 #![windows_subsystem = "windows"]
 
 mod accounts;
+mod avatars;
+mod vaultsvc;
 mod app;
 mod destinations;
 mod dialogs;
@@ -31,8 +33,8 @@ use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-const MAIN_CLASS: PCWSTR = w!("WaypointMain");
-pub const PANEL_CLASS: PCWSTR = w!("WaypointPanel");
+const MAIN_CLASS: PCWSTR = w!("RAMMain");
+pub const PANEL_CLASS: PCWSTR = w!("RAMPanel");
 
 /// Keyboard shortcuts. Command IDs reuse the control IDs they trigger.
 const ACCELERATORS: &[(u8, u16, u16)] = &[
@@ -85,14 +87,14 @@ fn main() {
     let data_dir = args
         .data_dir
         .clone()
-        .or_else(|| ram_win::paths::local_app_data().map(|p| p.join("Waypoint")))
+        .or_else(|| ram_win::paths::local_app_data().map(|p| p.join("RAM")))
         .unwrap_or_else(|| PathBuf::from("."));
 
     // One instance per data directory; a second start brings the first to
     // the front.
     if !custom_dir {
         unsafe {
-            let _mutex = CreateMutexW(None, true, w!("Local\\Waypoint.AccountManager"));
+            let _mutex = CreateMutexW(None, true, w!("Local\\RAM.AccountManager"));
             if GetLastError() == ERROR_ALREADY_EXISTS {
                 if let Ok(existing) = FindWindowW(MAIN_CLASS, None) {
                     let _ = ShowWindow(existing, SW_RESTORE);
@@ -114,7 +116,7 @@ fn main() {
 
     let _ = std::fs::create_dir_all(&data_dir);
     let store_file = StoreFile::new(data_dir.join("store.json"));
-    let log = Log::new(data_dir.join("waypoint.log"));
+    let log = Log::new(data_dir.join("RAM.log"));
     let mut startup_note = String::new();
     let mut read_only = false;
     let mut store = match store_file.load() {
@@ -143,6 +145,11 @@ fn main() {
     if let Some(n) = args.seed {
         seed_demo(&mut store, n);
     }
+    let vault_path = data_dir.join("vault.bin");
+    let vault = ram_core::vault::Vault::open(&vault_path).unwrap_or_else(|e| {
+        log.line(now(), &format!("vault load: {e}"));
+        ram_core::vault::Vault::new_unconfigured(&vault_path)
+    });
 
     unsafe {
         let class = WNDCLASSEXW {
@@ -167,7 +174,7 @@ fn main() {
         let hwnd = CreateWindowExW(
             WS_EX_CONTROLPARENT,
             MAIN_CLASS,
-            w!("Waypoint"),
+            w!("RAM"),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             x,
             y,
@@ -208,6 +215,7 @@ fn main() {
             view: ViewId::Accounts,
             nav: [HWND::default(); 4],
             status: HWND::default(),
+            title: HWND::default(),
             panels: [HWND::default(); 4],
             accounts: Default::default(),
             destinations: Default::default(),
@@ -223,6 +231,10 @@ fn main() {
             created: [false; 4],
             links_restored: false,
             unwatched: false,
+            vault,
+            entropy: vaultsvc::WinEntropy,
+            protector: vaultsvc::WinProtector,
+            singleton: None,
         });
 
         for (i, (_, title)) in VIEWS.iter().enumerate() {
@@ -244,6 +256,7 @@ fn main() {
             .unwrap_or_default();
         }
         state.status = ui::label(hwnd, ID_STATUS, "");
+        state.title = ui::label(hwnd, ID_TITLE, "RAM");
         install(state);
         let app = try_app().expect("installed");
 
@@ -264,6 +277,18 @@ fn main() {
         match WindowShowHook::install(hwnd.0 as isize, WM_PROC_SHOW, &[ram_win::process::DESKTOP_IMAGE, ram_win::process::STORE_IMAGE]) {
             Ok(hook) => app.show_hook = Some(hook),
             Err(e) => app.log(&format!("window hook unavailable: {e}")),
+        }
+
+        // A DPAPI vault unlocks automatically for this Windows user; a
+        // master-password vault stays locked until the user unlocks it.
+        if app.vault.is_configured() && app.vault.mode() == Some(ram_core::vault::VaultMode::Dpapi) {
+            if let Err(e) = app.vault.unlock_dpapi(&app.protector, now()) {
+                app.log(&format!("vault auto-unlock: {e}"));
+            }
+        }
+        app.apply_multi_instance();
+        if app.vault.mode() == Some(ram_core::vault::VaultMode::MasterPassword) {
+            SetTimer(Some(hwnd), TIMER_VAULT, 20_000, None);
         }
 
         mark("hook installed", &mut marks);
@@ -359,8 +384,13 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         }
         WM_GETMINMAXINFO => {
             let info = &mut *(lparam.0 as *mut MINMAXINFO);
-            let chrome = app.m.row() * 2 + app.m.gap() * 3 + app.m.px(46);
-            info.ptMinTrackSize = POINT { x: app.m.px(900), y: (accounts::min_height(&app.m) + chrome).max(app.m.px(520)) };
+            let m = &app.m;
+            let content_h = accounts::min_height(m) + m.row() + m.gap() * 2;
+            let sidebar_h = m.px(16) + m.row() * 7;
+            info.ptMinTrackSize = POINT {
+                x: app.sidebar_w() + m.px(720),
+                y: content_h.max(sidebar_h).max(m.px(520)),
+            };
             LRESULT(0)
         }
         WM_DPICHANGED => {
@@ -378,8 +408,15 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_ERASEBKGND => {
+            let hdc = HDC(wparam.0 as *mut _);
             let rc = ui::client_rect(hwnd);
-            FillRect(HDC(wparam.0 as *mut _), &rc, app.brushes.window);
+            FillRect(hdc, &rc, app.brushes.window);
+            // The left sidebar is painted a distinct surface colour.
+            let side = app.sidebar_w();
+            let bar = RECT { left: 0, top: 0, right: side, bottom: rc.bottom };
+            FillRect(hdc, &bar, app.brushes.surface);
+            let edge = RECT { left: side - 1, top: 0, right: side, bottom: rc.bottom };
+            FillRect(hdc, &edge, app.brushes.border);
             LRESULT(1)
         }
         WM_COMMAND => {
@@ -410,6 +447,12 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                     let _ = KillTimer(Some(hwnd), TIMER_SEARCH);
                     accounts::refresh(app);
                 }
+                TIMER_VAULT => {
+                    if app.vault.tick(now()) {
+                        app.set_status("Vault locked after inactivity.");
+                        accounts::refresh_rows(app);
+                    }
+                }
                 _ => {}
             }
             LRESULT(0)
@@ -421,6 +464,11 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         WM_CHECK_DONE => {
             let done = Box::from_raw(lparam.0 as *mut CheckDone);
             app.on_check_done(*done);
+            LRESULT(0)
+        }
+        WM_LAUNCH_DONE => {
+            let done = Box::from_raw(lparam.0 as *mut LaunchDone);
+            app.on_launch_done(*done);
             LRESULT(0)
         }
         WM_ACTIVATE => {

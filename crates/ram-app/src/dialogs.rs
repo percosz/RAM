@@ -15,7 +15,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-const DIALOG_CLASS: PCWSTR = w!("WaypointDialog");
+const DIALOG_CLASS: PCWSTR = w!("RAMDialog");
 const ID_OK: u16 = 1;
 const ID_CANCEL: u16 = 2;
 const ID_ERROR: u16 = 90;
@@ -328,6 +328,82 @@ pub fn choose(owner: HWND, title: &str, intro: &str, ok_label: &str, options: &[
     } else {
         None
     }
+}
+
+/// Asks for a single secret value in a masked field (master password,
+/// pasted cookie). `validate` returns an error to show inline.
+pub fn prompt_secret(
+    owner: HWND,
+    title: &str,
+    intro: &str,
+    label: &str,
+    ok_label: &str,
+    validate: &dyn Fn(&str) -> Result<(), String>,
+) -> Option<String> {
+    let mut value = None;
+    let ok = modal(
+        owner,
+        title,
+        460,
+        190,
+        ok_label,
+        &mut |dlg, m, cw, _| {
+            let (gap, row) = (m.gap(), m.row());
+            let mut y = gap;
+            if !intro.is_empty() {
+                let p = ui::paragraph(dlg, LABEL_MUTED, intro);
+                ui::place(p, gap, y, cw - 2 * gap, row * 2);
+                y += row * 2 + gap / 2;
+            }
+            let l = ui::label(dlg, LABEL, label);
+            ui::place(l, gap, y, cw - 2 * gap, row - m.px(4));
+            y += row - m.px(2);
+            let e = ui::edit_password(dlg, ID_FIELD);
+            ui::place(e, gap, y, cw - 2 * gap, row);
+        },
+        &mut |dlg| {
+            let text = unsafe { GetDlgItem(Some(dlg), ID_FIELD as i32).map(ui::get_text).unwrap_or_default() };
+            match validate(&text) {
+                Ok(()) => {
+                    value = Some(text);
+                    true
+                }
+                Err(e) => {
+                    show_error(dlg, &e);
+                    false
+                }
+            }
+        },
+    );
+    ok.then_some(value).flatten()
+}
+
+/// Shows a secret in a read-only field for the user to read. The primary
+/// button copies it to the clipboard. Used behind a Windows Hello or
+/// password gate.
+pub fn show_secret(owner: HWND, title: &str, intro: &str, text: &str) {
+    let text = text.to_string();
+    modal(
+        owner,
+        title,
+        540,
+        230,
+        "Copy",
+        &mut |dlg, m, cw, _| {
+            let (gap, row) = (m.gap(), m.row());
+            let p = ui::paragraph(dlg, LABEL_MUTED, intro);
+            ui::place(p, gap, gap, cw - 2 * gap, row * 2);
+            let e = ui::edit_multiline(dlg, ID_FIELD);
+            ui::place(e, gap, gap + row * 2 + gap, cw - 2 * gap, row * 3);
+            ui::set_text(e, &text);
+            // EM_SETREADONLY: show the secret without letting it be edited.
+            ui::send(e, 0x00CF, 1, 0);
+        },
+        &mut |dlg| {
+            let _ = ui::copy_to_clipboard(dlg, &text);
+            true
+        },
+    );
 }
 
 /// The system folder picker.

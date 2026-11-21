@@ -60,12 +60,12 @@ const T_WARN_PRIVATE_UNIT: &str = "MB (0 = off)";
 const T_WARN_SYSTEM: &str = "Warn when system memory use exceeds";
 const T_WARN_SYSTEM_UNIT: &str = "% (0 = off)";
 const T_NOTIFY: &str = "Also show a notification";
-const T_ADVISORY: &str = "Advisory only. Waypoint never trims or closes a client by itself.";
+const T_ADVISORY: &str = "Advisory only. RAM never trims or closes a client by itself.";
 const T_IDLE: &str = "Remind me when a running client has not been focused for";
 const T_IDLE_UNIT: &str = "minutes (0 = off)";
-const T_IDLE_NOTE: &str = "Reminder only; Waypoint never sends input to a client. Roblox disconnects idle players after about 20 minutes.";
+const T_IDLE_NOTE: &str = "Reminder only; RAM never sends input to a client. Roblox disconnects idle players after about 20 minutes.";
 const T_SAMPLE: [&str; 3] = ["Sample every", "s while this view is open, every", "s otherwise"];
-const T_FPS_REST: &str = "Roblox stores this once per Windows user, so it applies to every client including Main. Waypoint does not change it; set it in the client's Settings menu.";
+const T_FPS_REST: &str = "Roblox stores this once per Windows user, so it applies to every client including Main. RAM does not change it; set it in the client's Settings menu.";
 const T_PER_CLIENT: &str = "Per-client FPS caps and graphics presets: unavailable \u{2014} Roblox exposes no supported per-client setting.";
 const T_GPU_LIMIT: &str = "Hard GPU limit: unsupported \u{2014} Windows has no per-process GPU cap.";
 const T_EMPTY: &str = "No Roblox clients are running. Launch an account from Accounts; its client appears here once Windows shows it.";
@@ -936,7 +936,7 @@ fn assign_selected(app: &mut App) {
     }
     let names: Vec<String> = free.iter().map(|(_, name)| name.clone()).collect();
     let intro = format!(
-        "Which account is signed in to the client with process ID {}? Waypoint cannot check this. If it may be Main, choose Main so it stays exempt.",
+        "Which account is signed in to the client with process ID {}? RAM cannot check this. If it may be Main, choose Main so it stays exempt.",
         key.pid
     );
     let picked = dialogs::choose(app.hwnd, "Assign to account", &intro, "Assign", &names);
@@ -995,7 +995,7 @@ fn close_selected(app: &mut App) {
         text.push_str(&format!("This client is linked to your Main account, {}.\n\n", app.account_name(account)));
     }
     text.push_str(&format!(
-        "Ask {who} to close?\n\nThis asks the client to close, like clicking the X on its window. Waypoint never force-terminates a client: if Roblox does not close, it keeps running."
+        "Ask {who} to close?\n\nThis asks the client to close, like clicking the X on its window. RAM never force-terminates a client: if Roblox does not close, it keeps running."
     ));
     let confirmed = ui::confirm(app.hwnd, "Close client", &text);
     ui::focus(app.performance.list);

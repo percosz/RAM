@@ -1,21 +1,32 @@
 //! The Accounts view: search, the account table, the details pane and the
 //! launch bar.
+//!
+//! The table is a virtual (owner-data) report list drawn entirely in
+//! `NM_CUSTOMDRAW`: each row paints its own background (an accent wash and a
+//! left bar when selected), a rounded avatar chip in the Name column, the
+//! per-column tone colours and a muted key marker for accounts with a stored
+//! cookie. A second, dense "Classic" column set and an inline quick-launch
+//! toolbar are offered through `store.settings.layout`.
 
-use crate::app::{self, now, tone_color, tone_for_client, tone_for_sign_in, App, Tone, LABEL, LABEL_MUTED, TIMER_DETAILS, TIMER_SEARCH};
+use crate::app::{self, now, tone_color, tone_for_client, tone_for_sign_in, App, CookieState, Tone, LABEL, LABEL_MUTED, TIMER_DETAILS, TIMER_SEARCH};
+use crate::avatars;
 use crate::dialogs::{self, CheckRow, Field};
 use crate::ui;
 use ram_core::clients::ClientState;
 use ram_core::import::{self, LegacyDecryptor, PlanAction, PlanKind};
-use ram_core::model::{Account, AccountId, BrowserBinding, PresetKind, Target};
+use ram_core::links;
+use ram_core::model::{Account, AccountId, BrowserBinding, LayoutMode, PresetKind, Target};
 use ram_core::perf;
 use ram_core::platform::{BrowserApi, BrowserInstall, BrowserProfile, WindowApi};
 use ram_core::search::{self, QueryContext, SortKey};
 use ram_core::signin::{self, CheckOutcome, RecoveryKind};
 use std::time::Instant;
+use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Gdi::UpdateWindow;
+use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DELETE, VK_ESCAPE, VK_RETURN};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass, ShellExecuteW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub const ID_SEARCH: u16 = 1000;
@@ -45,6 +56,20 @@ const ID_RESUME: u16 = 1025;
 const ID_SIGNIN_STATE: u16 = 1030;
 const ID_CLIENT_STATE: u16 = 1031;
 const ID_TITLE: u16 = 1032;
+// Cookie controls in the details pane.
+const ID_COOKIE_SET: u16 = 1040;
+const ID_COOKIE_REVEAL: u16 = 1041;
+const ID_COOKIE_COPY: u16 = 1042;
+const ID_COOKIE_REMOVE: u16 = 1043;
+const ID_COOKIE_STATE: u16 = 1044;
+/// Owner-painted counts and legend bar above the launch bar.
+const ID_LEGEND: u16 = 1045;
+// Classic layout's inline quick-launch toolbar and bottom bar.
+const ID_PLACE: u16 = 1050;
+const ID_JOB: u16 = 1051;
+const ID_JOIN: u16 = 1052;
+const ID_ACCOUNTS_FILE: u16 = 1053;
+const ID_OPEN_LOG: u16 = 1054;
 pub const CMD_FOCUS_SEARCH: u16 = 1090;
 pub const CMD_SELECT_ALL: u16 = 1091;
 pub const CMD_TOGGLE_MAIN: u16 = 1092;
@@ -53,7 +78,8 @@ const CMD_SIGN_IN: u16 = 1094;
 const CMD_RECOVERY: u16 = 1095;
 const CMD_DEAUTHORIZE: u16 = 1096;
 
-const COLUMNS: [(&str, i32); 8] = [
+/// The modern column set: an avatar-led, information-rich table.
+const MODERN_COLUMNS: [(&str, i32); 8] = [
     ("", 48),
     ("Name", 150),
     ("Username", 140),
@@ -62,6 +88,16 @@ const COLUMNS: [(&str, i32); 8] = [
     ("Sign-in", 132),
     ("Client", 96),
     ("Last used", 84),
+];
+
+/// The classic column set: a dense, alyae-style table.
+const CLASSIC_COLUMNS: [(&str, i32); 6] = [
+    ("ONLINE", 56),
+    ("USERNAME", 150),
+    ("ALIAS", 140),
+    ("GROUP", 120),
+    ("MODE", 130),
+    ("DESCRIPTION", 220),
 ];
 
 #[derive(Default)]
@@ -75,6 +111,7 @@ pub struct AccountsView {
     dest: HWND,
     launch: HWND,
     cancel: HWND,
+    legend: HWND,
     title: HWND,
     subtitle: HWND,
     labels: Vec<HWND>,
@@ -93,11 +130,22 @@ pub struct AccountsView {
     check: HWND,
     authorize: HWND,
     needs_verify: HWND,
+    cookie_state: HWND,
+    cookie_set: HWND,
+    cookie_reveal: HWND,
+    cookie_copy: HWND,
+    cookie_remove: HWND,
     client_state: HWND,
     client_detail: HWND,
     focus_client: HWND,
     rejoin: HWND,
     resume: HWND,
+    // Classic-only controls.
+    place_edit: HWND,
+    job_edit: HWND,
+    join: HWND,
+    accounts_file: HWND,
+    open_log: HWND,
     /// Account IDs in display order; the virtual list reads from this.
     pub rows: Vec<AccountId>,
     dest_targets: Vec<Target>,
@@ -111,6 +159,9 @@ pub struct AccountsView {
     shown: Option<AccountId>,
     /// What the details combo boxes were last filled from.
     combo_signature: String,
+    /// Which column set the list currently holds, so columns are rebuilt
+    /// only when the layout actually changes.
+    col_mode: Option<LayoutMode>,
 }
 
 pub fn is_accent(id: u16) -> bool {
@@ -122,8 +173,16 @@ pub fn static_tone(app: &App, id: u16) -> Option<Tone> {
     match id {
         ID_SIGNIN_STATE => Some(account.map(|a| tone_for_sign_in(a.sign_in.state)).unwrap_or(Tone::Muted)),
         ID_CLIENT_STATE => Some(account.map(|a| tone_for_client(&app.clients.state(a.id))).unwrap_or(Tone::Muted)),
+        ID_COOKIE_STATE => Some(match app.accounts.shown.map(|id| app.cookie_state(id)) {
+            Some(CookieState::Stored) => Tone::Good,
+            _ => Tone::Muted,
+        }),
         _ => None,
     }
+}
+
+fn is_classic(app: &App) -> bool {
+    app.store.settings.layout == LayoutMode::Classic
 }
 
 pub fn create(app: &mut App) {
@@ -135,18 +194,16 @@ pub fn create(app: &mut App) {
     v.import = ui::button(p, ID_IMPORT, "Import\u{2026}");
     v.remove = ui::button(p, ID_REMOVE, "Remove");
     v.list = ui::listview(p, ID_LIST, 0);
-    for (i, (title, width)) in COLUMNS.iter().enumerate() {
-        ui::list_add_column(v.list, i as i32, title, app.m.px(*width));
-    }
     crate::theme::subclass_list(v.list);
     v.dest_label = ui::label(p, LABEL, "Launch to");
     v.dest = ui::combo(p, ID_DEST);
     v.launch = ui::button(p, ID_LAUNCH, "Launch");
     v.cancel = ui::button(p, ID_CANCEL, "Cancel queue");
+    v.legend = ui::label(p, ID_LEGEND, "");
 
     v.title = ui::label(p, ID_TITLE, "");
     v.subtitle = ui::label(p, LABEL_MUTED, "");
-    for text in ["Alias", "Group", "Tags (comma-separated)", "Notes", "Browser", "Profile", "Performance", "Sign-in", "Client"] {
+    for text in ["Alias", "Group", "Tags (comma-separated)", "Notes", "Browser", "Profile", "Performance", "Sign-in", "Client", "Cookie"] {
         v.labels.push(ui::label(p, LABEL_MUTED, text));
     }
     v.alias = ui::edit(p, ID_ALIAS);
@@ -164,15 +221,75 @@ pub fn create(app: &mut App) {
     v.check = ui::button(p, ID_CHECK, "Check");
     v.authorize = ui::button(p, ID_AUTHORIZE, "Authorize");
     v.needs_verify = ui::button(p, ID_NEEDS_VERIFY, "Needs verification");
+    v.cookie_state = ui::label(p, ID_COOKIE_STATE, "");
+    v.cookie_set = ui::button(p, ID_COOKIE_SET, "Set\u{2026}");
+    v.cookie_reveal = ui::button(p, ID_COOKIE_REVEAL, "Reveal");
+    v.cookie_copy = ui::button(p, ID_COOKIE_COPY, "Copy");
+    v.cookie_remove = ui::button(p, ID_COOKIE_REMOVE, "Remove");
     v.client_state = ui::label(p, ID_CLIENT_STATE, "");
     v.client_detail = ui::paragraph(p, LABEL_MUTED, "");
     v.focus_client = ui::button(p, ID_FOCUS_CLIENT, "Focus");
     v.rejoin = ui::button(p, ID_REJOIN, "Rejoin");
     v.resume = ui::button(p, ID_RESUME, "Resume");
+
+    v.place_edit = ui::edit(p, ID_PLACE);
+    ui::set_cue(v.place_edit, "Place ID");
+    v.job_edit = ui::edit(p, ID_JOB);
+    ui::set_cue(v.job_edit, "Job ID (optional)");
+    v.join = ui::button(p, ID_JOIN, "Join");
+    v.accounts_file = ui::button(p, ID_ACCOUNTS_FILE, "Accounts file");
+    v.open_log = ui::button(p, ID_OPEN_LOG, "Open log");
     v.installs = app.browsers.installed();
+
+    subclass_legend(app.accounts.legend);
+    set_columns(app);
+}
+
+/// Rebuilds the list's columns for the current layout. Cheap, but only run
+/// when the layout changes.
+fn set_columns(app: &mut App) {
+    let list = app.accounts.list;
+    while ui::send(list, LVM_DELETECOLUMN, 0, 0) != 0 {}
+    let cols: &[(&str, i32)] = if is_classic(app) { &CLASSIC_COLUMNS } else { &MODERN_COLUMNS };
+    for (i, (title, w)) in cols.iter().enumerate() {
+        ui::list_add_column(list, i as i32, title, app.m.px(*w));
+    }
+    app.accounts.col_mode = Some(app.store.settings.layout);
+    app.accounts.sort = SortKey::Default;
+    app.accounts.descending = false;
+}
+
+/// Shows the controls for the active layout and hides the rest.
+fn set_visibility(app: &App, classic: bool) {
+    let v = &app.accounts;
+    let modern = [
+        v.title, v.subtitle, v.alias, v.group, v.tags, v.notes, v.fav, v.main, v.browser, v.profile, v.perf,
+        v.signin_state, v.signin_detail, v.recover, v.check, v.authorize, v.needs_verify, v.cookie_state,
+        v.cookie_set, v.cookie_reveal, v.cookie_copy, v.cookie_remove, v.client_state, v.client_detail,
+        v.focus_client, v.rejoin, v.resume,
+    ];
+    for h in modern {
+        ui::show(h, !classic);
+    }
+    for h in &v.labels {
+        ui::show(*h, !classic);
+    }
+    for h in [v.place_edit, v.job_edit, v.join, v.accounts_file, v.open_log] {
+        ui::show(h, classic);
+    }
 }
 
 pub fn layout(app: &mut App) {
+    let classic = is_classic(app);
+    set_visibility(app, classic);
+    if classic {
+        layout_classic(app);
+    } else {
+        layout_modern(app);
+    }
+}
+
+fn layout_modern(app: &mut App) {
     let rc = ui::client_rect(app.panels[0]);
     let m = &app.m;
     let v = &app.accounts;
@@ -181,7 +298,7 @@ pub fn layout(app: &mut App) {
     let left_w = rc.right - detail_w - 3 * gap;
     let bw = m.px(84);
 
-    // Left: search row, table, launch bar.
+    // Left: search row, table, legend bar, launch bar.
     let mut x = gap;
     ui::place(v.search, x, 0, left_w - 3 * (bw + gap), row);
     x += left_w - 3 * (bw + gap) + gap;
@@ -190,13 +307,14 @@ pub fn layout(app: &mut App) {
         x += bw + gap;
     }
     let list_top = row + gap;
-    let bar_y = rc.bottom - row - gap;
-    ui::place(v.list, gap, list_top, left_w, bar_y - gap - list_top);
-    // The Name column takes whatever width the fixed columns leave.
-    // Columns adapt to the width: Name takes the spare space, and the
-    // least important columns give way first so the table never needs a
-    // horizontal scroll bar.
-    let mut widths: Vec<i32> = COLUMNS.iter().map(|(_, w)| m.px(*w)).collect();
+    let launch_y = rc.bottom - row - gap;
+    let legend_y = launch_y - row - gap;
+    ui::place(v.list, gap, list_top, left_w, legend_y - gap - list_top);
+    ui::place(v.legend, gap, legend_y, left_w, row);
+    // The Name column takes whatever width the fixed columns leave. Columns
+    // adapt to the width: the least important ones give way first so the
+    // table never needs a horizontal scroll bar.
+    let mut widths: Vec<i32> = MODERN_COLUMNS.iter().map(|(_, w)| m.px(*w)).collect();
     let available = left_w - m.px(24);
     let name_min = m.px(120);
     for drop in [4usize, 7, 3, 2] {
@@ -212,13 +330,13 @@ pub fn layout(app: &mut App) {
         ui::send(v.list, LVM_SETCOLUMNWIDTH, i, *w as isize);
     }
     let label_w = m.px(64);
-    ui::place(v.dest_label, gap, bar_y + m.px(5), label_w, row);
+    ui::place(v.dest_label, gap, launch_y + m.px(5), label_w, row);
     let launch_w = m.px(96);
     let cancel_w = m.px(108);
     let combo_w = left_w - label_w - launch_w - cancel_w - 3 * gap;
-    ui::place(v.dest, gap + label_w + gap, bar_y, combo_w, row * 14);
-    ui::place(v.launch, gap + label_w + combo_w + 2 * gap, bar_y, launch_w, row);
-    ui::place(v.cancel, gap + label_w + combo_w + launch_w + 3 * gap, bar_y, cancel_w, row);
+    ui::place(v.dest, gap + label_w + gap, launch_y, combo_w, row * 14);
+    ui::place(v.launch, gap + label_w + combo_w + 2 * gap, launch_y, launch_w, row);
+    ui::place(v.cancel, gap + label_w + combo_w + launch_w + 3 * gap, launch_y, cancel_w, row);
 
     // Right: details pane.
     let dx = rc.right - detail_w - gap;
@@ -265,6 +383,17 @@ pub fn layout(app: &mut App) {
     ui::place(v.authorize, dx + half + gap, y, half, row);
     y += row + gap;
 
+    // Cookie row: a status label and the four vault actions.
+    ui::place(v.labels[9], dx, y, m.px(60), lh);
+    ui::place(v.cookie_state, dx + m.px(60), y, dw - m.px(60), lh);
+    y += lh;
+    let b4 = (dw - 3 * gap) / 4;
+    ui::place(v.cookie_set, dx, y, b4, row);
+    ui::place(v.cookie_reveal, dx + (b4 + gap), y, b4, row);
+    ui::place(v.cookie_copy, dx + 2 * (b4 + gap), y, b4, row);
+    ui::place(v.cookie_remove, dx + 3 * (b4 + gap), y, b4, row);
+    y += row + gap;
+
     ui::place(v.labels[8], dx, y, m.px(60), lh);
     ui::place(v.client_state, dx + m.px(60), y, dw - m.px(60), lh);
     y += lh;
@@ -276,10 +405,77 @@ pub fn layout(app: &mut App) {
     ui::place(v.resume, dx + 2 * (b3 + gap), y, b3, row);
 }
 
+fn layout_classic(app: &mut App) {
+    let rc = ui::client_rect(app.panels[0]);
+    let m = &app.m;
+    let v = &app.accounts;
+    let (gap, row) = (m.gap(), m.row());
+    let full_w = rc.right - 2 * gap;
+
+    // Top toolbar: search, inline quick-launch, then Add/Import/Remove.
+    let bw = m.px(78);
+    let place_w = m.px(96);
+    let job_w = m.px(96);
+    let join_w = m.px(56);
+    let right_block = place_w + job_w + join_w + 3 * bw + 6 * gap;
+    let search_w = (full_w - right_block).max(m.px(160));
+    let mut x = gap;
+    ui::place(v.search, x, 0, search_w, row);
+    x += search_w + gap;
+    ui::place(v.place_edit, x, 0, place_w, row);
+    x += place_w + gap;
+    ui::place(v.job_edit, x, 0, job_w, row);
+    x += job_w + gap;
+    ui::place(v.join, x, 0, join_w, row);
+    x += join_w + gap;
+    for b in [v.add, v.import, v.remove] {
+        ui::place(b, x, 0, bw, row);
+        x += bw + gap;
+    }
+
+    let list_top = row + gap;
+    let launch_y = rc.bottom - row - gap;
+    let info_y = launch_y - row - gap;
+    ui::place(v.list, gap, list_top, full_w, info_y - gap - list_top);
+
+    // Dense proportional columns: a fixed ONLINE dot, GROUP and MODE, and
+    // flexible USERNAME, ALIAS and DESCRIPTION.
+    let online = m.px(56);
+    let group = m.px(120);
+    let mode = m.px(130);
+    let avail = (full_w - m.px(24) - online - group - mode).max(m.px(270));
+    let username = (avail * 3 / 10).max(m.px(90));
+    let alias = (avail * 3 / 10).max(m.px(80));
+    let desc = (avail - username - alias).max(m.px(100));
+    for (i, w) in [online, username, alias, group, mode, desc].iter().enumerate() {
+        ui::send(v.list, LVM_SETCOLUMNWIDTH, i, *w as isize);
+    }
+
+    // Info row: totals on the left, data-folder and log buttons on the right.
+    let btn_w = m.px(110);
+    ui::place(v.open_log, rc.right - gap - btn_w, info_y, btn_w, row);
+    ui::place(v.accounts_file, rc.right - gap - 2 * btn_w - gap, info_y, btn_w, row);
+    ui::place(v.legend, gap, info_y, full_w - 2 * (btn_w + gap), row);
+
+    // Launch bar: the destination fallback, Launch and Cancel.
+    let label_w = m.px(64);
+    let launch_w = m.px(96);
+    let cancel_w = m.px(108);
+    let combo_w = full_w - label_w - launch_w - cancel_w - 3 * gap;
+    ui::place(v.dest_label, gap, launch_y + m.px(5), label_w, row);
+    ui::place(v.dest, gap + label_w + gap, launch_y, combo_w, row * 14);
+    ui::place(v.launch, gap + label_w + combo_w + 2 * gap, launch_y, launch_w, row);
+    ui::place(v.cancel, gap + label_w + combo_w + launch_w + 3 * gap, launch_y, cancel_w, row);
+}
+
 /// Height of the fixed blocks under the notes box.
 fn below_notes(m: &ui::Metrics) -> i32 {
     let (gap, row, lh) = (m.gap(), m.row(), m.px(18));
-    (row + gap) + (lh + row + gap) * 2 + (lh * 3 + m.px(2) + row * 2 + gap / 2 + gap) + (lh * 3 + m.px(2) + row)
+    (row + gap)
+        + (lh + row + gap) * 2
+        + (lh * 3 + m.px(2) + row * 2 + gap / 2 + gap)
+        + (lh + row + gap)
+        + (lh * 3 + m.px(2) + row)
 }
 
 /// Smallest panel height at which the details pane fits without overlap.
@@ -296,6 +492,10 @@ fn query_context(app: &App) -> QueryContext {
 
 /// Re-runs the search and sort, then repaints the table and details.
 pub fn refresh(app: &mut App) {
+    if app.accounts.col_mode != Some(app.store.settings.layout) {
+        set_columns(app);
+        layout(app);
+    }
     let selected: std::collections::HashSet<AccountId> = selected_ids(app).into_iter().collect();
     let query = ui::get_text(app.accounts.search);
     let mut ids = app.index.query(&query, &query_context(app));
@@ -316,6 +516,7 @@ pub fn refresh(app: &mut App) {
         }
     }
     app.accounts.loading = false;
+    ui::invalidate(app.accounts.legend);
     refresh_destinations(app);
     refresh_details(app);
 }
@@ -324,6 +525,7 @@ pub fn refresh(app: &mut App) {
 /// selection. Cheap enough to call on every state change.
 pub fn refresh_rows(app: &mut App) {
     ui::invalidate(app.accounts.list);
+    ui::invalidate(app.accounts.legend);
     refresh_details(app);
 }
 
@@ -390,7 +592,33 @@ fn client_text(app: &App, id: AccountId) -> String {
     }
 }
 
+/// The classic MODE cell: the live client state when there is one, otherwise
+/// the sign-in state.
+fn mode_label(app: &App, a: &Account) -> String {
+    match app.clients.state(a.id) {
+        ClientState::Idle | ClientState::Exited { .. } => a.sign_in.state.label().to_string(),
+        other => other.label().to_string(),
+    }
+}
+
+fn mode_tone(app: &App, a: &Account) -> Tone {
+    match app.clients.state(a.id) {
+        ClientState::Idle | ClientState::Exited { .. } => tone_for_sign_in(a.sign_in.state),
+        other => tone_for_client(&other),
+    }
+}
+
+/// The text of one cell for the active layout. The virtual list and the
+/// owner-draw path share this, so both stay in step.
 fn cell(app: &App, a: &Account, column: i32) -> String {
+    if is_classic(app) {
+        cell_classic(app, a, column)
+    } else {
+        cell_modern(app, a, column)
+    }
+}
+
+fn cell_modern(app: &App, a: &Account, column: i32) -> String {
     match column {
         0 => {
             if app.store.is_main(a.id) {
@@ -418,6 +646,45 @@ fn cell(app: &App, a: &Account, column: i32) -> String {
     }
 }
 
+fn cell_classic(app: &App, a: &Account, column: i32) -> String {
+    match column {
+        // The dot is drawn in the owner-draw path; the text stays empty.
+        0 => String::new(),
+        1 => a.username.clone(),
+        2 => a.alias.clone(),
+        3 => import::group_display_name(&a.group).to_string(),
+        4 => mode_label(app, a),
+        5 => a.notes.lines().next().unwrap_or("").to_string(),
+        _ => String::new(),
+    }
+}
+
+/// The tone colour of a cell for the active layout.
+fn cell_tone(app: &App, a: &Account, classic: bool, col: usize) -> Tone {
+    if classic {
+        match col {
+            0 => {
+                if matches!(app.clients.state(a.id), ClientState::Running) {
+                    Tone::Good
+                } else {
+                    Tone::Muted
+                }
+            }
+            1 => Tone::Text,
+            4 => mode_tone(app, a),
+            _ => Tone::Muted,
+        }
+    } else {
+        match col {
+            5 => tone_for_sign_in(a.sign_in.state),
+            6 => tone_for_client(&app.clients.state(a.id)),
+            0 if app.store.is_main(a.id) => Tone::Good,
+            2 | 3 | 4 | 7 => Tone::Muted,
+            _ => Tone::Text,
+        }
+    }
+}
+
 /// Updates the details pane for the current selection.
 pub fn refresh_details(app: &mut App) {
     let ids = selected_ids(app);
@@ -425,6 +692,8 @@ pub fn refresh_details(app: &mut App) {
     let editable = one.is_some();
     app.accounts.loading = true;
     app.accounts.shown = one.as_ref().map(|a| a.id);
+    let cookie = app.accounts.shown.map(|id| app.cookie_state(id)).unwrap_or(CookieState::Missing);
+    let stored = cookie == CookieState::Stored;
     let v = &app.accounts;
     for h in [v.alias, v.group, v.tags, v.notes, v.fav, v.main, v.browser, v.profile, v.perf, v.recover, v.check, v.authorize, v.needs_verify] {
         ui::enable(h, editable);
@@ -432,6 +701,22 @@ pub fn refresh_details(app: &mut App) {
     ui::enable(v.remove, !ids.is_empty());
     ui::enable(v.launch, !ids.is_empty());
     ui::enable(v.cancel, app.clients.queued_len() > 0);
+    ui::enable(v.cookie_set, editable);
+    ui::enable(v.cookie_reveal, editable && stored);
+    ui::enable(v.cookie_copy, editable && stored);
+    ui::enable(v.cookie_remove, editable && stored);
+    ui::set_text_if_changed(
+        v.cookie_state,
+        if !editable {
+            ""
+        } else {
+            match cookie {
+                CookieState::Stored => "Stored",
+                CookieState::Missing => "None",
+                CookieState::NoVault => "No vault",
+            }
+        },
+    );
 
     match &one {
         None => {
@@ -562,7 +847,7 @@ pub fn refresh_details(app: &mut App) {
             ui::enable(v.resume, matches!(state, ClientState::Paused { .. }));
         }
     }
-    for h in [app.accounts.signin_state, app.accounts.client_state] {
+    for h in [app.accounts.signin_state, app.accounts.client_state, app.accounts.cookie_state] {
         ui::invalidate(h);
     }
     app.accounts.loading = false;
@@ -601,6 +886,270 @@ fn refresh_profiles(app: &mut App, a: &Account) {
         app.accounts.profiles = profiles;
     }
     app.accounts.loading = false;
+}
+
+// ---- owner draw ------------------------------------------------------------
+
+/// Mixes two COLORREF values; `t` is the weight of `b`.
+fn blend(a: u32, b: u32, t: f32) -> u32 {
+    let ch = |c: u32, shift: u32| (c >> shift) & 0xff;
+    let mix = |x: u32, y: u32| ((x as f32 * (1.0 - t) + y as f32 * t) as u32).min(0xff);
+    mix(ch(a, 0), ch(b, 0)) | (mix(ch(a, 8), ch(b, 8)) << 8) | (mix(ch(a, 16), ch(b, 16)) << 16)
+}
+
+/// The client rectangle of one cell, in list coordinates.
+unsafe fn subitem_rect(list: HWND, item: usize, col: usize) -> RECT {
+    if col == 0 {
+        let mut rc = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
+        ui::send(list, LVM_GETITEMRECT, item, &mut rc as *mut _ as isize);
+        rc.right = rc.left + ui::send(list, LVM_GETCOLUMNWIDTH, 0, 0) as i32;
+        rc
+    } else {
+        let mut rc = RECT { left: LVIR_BOUNDS as i32, top: col as i32, ..Default::default() };
+        ui::send(list, LVM_GETSUBITEMRECT, item, &mut rc as *mut _ as isize);
+        rc
+    }
+}
+
+/// Draws a filled rounded avatar chip with centered white initials.
+unsafe fn draw_chip(hdc: HDC, x: i32, y: i32, sz: i32, color: u32, initials: &str, m: &ui::Metrics) {
+    let r = m.px(5);
+    let brush = CreateSolidBrush(COLORREF(color & 0x00FF_FFFF));
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(color & 0x00FF_FFFF));
+    let ob = SelectObject(hdc, brush.into());
+    let op = SelectObject(hdc, pen.into());
+    let _ = RoundRect(hdc, x, y, x + sz, y + sz, r * 2, r * 2);
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    let _ = DeleteObject(brush.into());
+    let _ = DeleteObject(pen.into());
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, COLORREF(0x00FF_FFFF));
+    let mut rc = RECT { left: x, top: y, right: x + sz, bottom: y + sz };
+    let mut text: Vec<u16> = initials.encode_utf16().collect();
+    DrawTextW(hdc, &mut text, &mut rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+}
+
+/// Draws a small filled status dot centred on a point.
+unsafe fn draw_dot(hdc: HDC, cx: i32, cy: i32, r: i32, color: u32) {
+    let brush = CreateSolidBrush(COLORREF(color));
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(color));
+    let ob = SelectObject(hdc, brush.into());
+    let op = SelectObject(hdc, pen.into());
+    let _ = Ellipse(hdc, cx - r, cy - r, cx + r, cy + r);
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    let _ = DeleteObject(brush.into());
+    let _ = DeleteObject(pen.into());
+}
+
+/// Draws a subtle key outline: the cookie-stored marker.
+unsafe fn draw_key(hdc: HDC, rc: &RECT, color: u32, m: &ui::Metrics) {
+    let cy = (rc.top + rc.bottom) / 2;
+    let r = m.px(3);
+    let bx = rc.left + r + m.px(1);
+    let pen = CreatePen(PS_SOLID, m.px(1).max(1), COLORREF(color));
+    let op = SelectObject(hdc, pen.into());
+    let hollow = GetStockObject(HOLLOW_BRUSH);
+    let ob = SelectObject(hdc, hollow);
+    let _ = Ellipse(hdc, bx - r, cy - r, bx + r, cy + r);
+    let _ = MoveToEx(hdc, bx + r, cy, None);
+    let _ = LineTo(hdc, rc.right, cy);
+    let _ = MoveToEx(hdc, rc.right - m.px(2), cy, None);
+    let _ = LineTo(hdc, rc.right - m.px(2), cy + m.px(3));
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    let _ = DeleteObject(pen.into());
+}
+
+/// Draws one cell: an avatar chip, an online dot, a cookie marker and the
+/// cell text, all tone-coloured.
+unsafe fn draw_cell(app: &App, hdc: HDC, a: &Account, classic: bool, col: usize, rc: RECT) {
+    let m = &app.m;
+    let p = &app.palette;
+    let pad = m.px(6);
+
+    if classic && col == 0 {
+        if matches!(app.clients.state(a.id), ClientState::Running) {
+            let cx = (rc.left + rc.right) / 2;
+            let cy = (rc.top + rc.bottom) / 2;
+            draw_dot(hdc, cx, cy, m.px(4), tone_color(p, Tone::Good));
+        }
+        return;
+    }
+
+    let mut tx = rc.left + pad;
+    if !classic && col == 1 {
+        let h = rc.bottom - rc.top;
+        let sz = (h - m.px(4)).clamp(m.px(14), m.px(20));
+        let cy = rc.top + (h - sz) / 2;
+        draw_chip(hdc, tx, cy, sz, avatars::color(a.id), &avatars::initials(a.display_name()), m);
+        tx += sz + m.px(6);
+    }
+
+    let mut text_rc = RECT { left: tx, top: rc.top, right: rc.right - pad, bottom: rc.bottom };
+    if !classic && col == 5 && app.cookie_state(a.id) == CookieState::Stored {
+        let kw = m.px(16);
+        let krc = RECT { left: text_rc.right - kw, top: rc.top, right: text_rc.right, bottom: rc.bottom };
+        draw_key(hdc, &krc, p.muted, m);
+        text_rc.right -= kw;
+    }
+
+    let text = cell(app, a, col as i32);
+    if text.is_empty() {
+        return;
+    }
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, COLORREF(tone_color(p, cell_tone(app, a, classic, col))));
+    let mut w: Vec<u16> = text.encode_utf16().collect();
+    DrawTextW(hdc, &mut w, &mut text_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+}
+
+/// Paints one row: background, selection wash and bar, then every cell.
+unsafe fn draw_row(app: &App, cd: &NMLVCUSTOMDRAW) {
+    let list = app.accounts.list;
+    let item = cd.nmcd.dwItemSpec;
+    let Some(a) = app.accounts.rows.get(item).and_then(|id| app.store.account(*id)) else { return };
+    let hdc = cd.nmcd.hdc;
+    let p = &app.palette;
+
+    let mut row_rc = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
+    ui::send(list, LVM_GETITEMRECT, item, &mut row_rc as *mut _ as isize);
+    let state = ui::send(list, LVM_GETITEMSTATE, item, (LVIS_SELECTED.0 | LVIS_FOCUSED.0) as isize) as u32;
+    let selected = state & LVIS_SELECTED.0 != 0;
+    let focused = state & LVIS_FOCUSED.0 != 0;
+
+    let bg = if selected { blend(p.surface, p.accent, 0.22) } else { p.surface };
+    let brush = CreateSolidBrush(COLORREF(bg));
+    FillRect(hdc, &row_rc, brush);
+    let _ = DeleteObject(brush.into());
+    if selected {
+        let bar = RECT { left: row_rc.left, top: row_rc.top, right: row_rc.left + app.m.px(3), bottom: row_rc.bottom };
+        let ab = CreateSolidBrush(COLORREF(p.accent));
+        FillRect(hdc, &bar, ab);
+        let _ = DeleteObject(ab.into());
+    }
+
+    let classic = is_classic(app);
+    let ncols = if classic { CLASSIC_COLUMNS.len() } else { MODERN_COLUMNS.len() };
+    for col in 0..ncols {
+        let rc = subitem_rect(list, item, col);
+        draw_cell(app, hdc, a, classic, col, rc);
+    }
+
+    if focused {
+        let fb = CreateSolidBrush(COLORREF(blend(p.surface, p.accent, 0.55)));
+        FrameRect(hdc, &row_rc, fb);
+        let _ = DeleteObject(fb.into());
+    }
+}
+
+// ---- legend bar ------------------------------------------------------------
+
+/// Subclasses the legend static so it owner-paints the counts and legend.
+fn subclass_legend(legend: HWND) {
+    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
+        match msg {
+            WM_ERASEBKGND => LRESULT(1),
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let hdc = BeginPaint(hwnd, &mut ps);
+                if let Some(app) = app::try_app() {
+                    paint_legend(app, hwnd, hdc);
+                }
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
+        }
+    }
+    unsafe {
+        let _ = SetWindowSubclass(legend, Some(proc), 1, 0);
+    }
+}
+
+/// Measures a string in the device context's current font.
+unsafe fn text_width(hdc: HDC, text: &str) -> i32 {
+    let w: Vec<u16> = text.encode_utf16().collect();
+    let mut size = SIZE::default();
+    let _ = GetTextExtentPoint32W(hdc, &w, &mut size);
+    size.cx
+}
+
+unsafe fn draw_label(hdc: HDC, text: &str, rc: &mut RECT, color: u32, fmt: DRAW_TEXT_FORMAT) {
+    SetTextColor(hdc, COLORREF(color));
+    let mut w: Vec<u16> = text.encode_utf16().collect();
+    DrawTextW(hdc, &mut w, rc, fmt | DT_SINGLELINE | DT_NOPREFIX);
+}
+
+/// Paints the counts on the left and, in the modern layout, a tone legend on
+/// the right. The legend yields to the counts when the row is narrow.
+fn paint_legend(app: &App, hwnd: HWND, hdc: HDC) {
+    let rc = ui::client_rect(hwnd);
+    let p = &app.palette;
+    let m = &app.m;
+    unsafe {
+        let brush = CreateSolidBrush(COLORREF(p.window));
+        FillRect(hdc, &rc, brush);
+        let _ = DeleteObject(brush.into());
+        SelectObject(hdc, m.font.into());
+        SetBkMode(hdc, TRANSPARENT);
+    }
+    let running = app.clients.running_accounts().len();
+    let total = app.store.accounts.len();
+    let pad = m.px(2);
+
+    if is_classic(app) {
+        let text = format!("Total: {total}   \u{00B7}   Running: {running}");
+        let mut trc = RECT { left: rc.left + pad, top: rc.top, right: rc.right, bottom: rc.bottom };
+        unsafe { draw_label(hdc, &text, &mut trc, p.muted, DT_LEFT | DT_VCENTER) };
+        return;
+    }
+
+    let selected = selected_ids(app).len();
+    let cookies = app.store.accounts.iter().filter(|a| app.cookie_state(a.id) == CookieState::Stored).count();
+    let counts = format!("{selected} selected   \u{00B7}   {total} accounts   \u{00B7}   {running} running   \u{00B7}   {cookies} with cookie");
+    let mut crc = RECT { left: rc.left + pad, top: rc.top, right: rc.right, bottom: rc.bottom };
+    unsafe { draw_label(hdc, &counts, &mut crc, p.muted, DT_LEFT | DT_VCENTER) };
+
+    let legend = [
+        ("Verified", p.good),
+        ("Signed out", p.bad),
+        ("Needs verification", p.warn),
+        ("Running", p.good),
+    ];
+    let dot = m.px(8);
+    let item_gap = m.px(14);
+    let dot_gap = m.px(4);
+    let (counts_w, labels_w) = unsafe {
+        let cw = text_width(hdc, &counts);
+        let lw: i32 = legend.iter().map(|(l, _)| text_width(hdc, l) + dot + dot_gap + item_gap).sum();
+        (cw, lw)
+    };
+    // Choose the richest legend that fits without touching the counts.
+    let cy = (rc.top + rc.bottom) / 2;
+    let fits_labels = rc.left + pad + counts_w + m.px(16) + labels_w <= rc.right;
+    let dots_only_w: i32 = legend.len() as i32 * (dot + item_gap);
+    let fits_dots = rc.left + pad + counts_w + m.px(16) + dots_only_w <= rc.right;
+    unsafe {
+        if fits_labels {
+            let mut x = rc.right - labels_w + item_gap / 2;
+            for (label, color) in legend {
+                draw_dot(hdc, x + dot / 2, cy, dot / 2, color);
+                x += dot + dot_gap;
+                let w = text_width(hdc, label);
+                let mut lrc = RECT { left: x, top: rc.top, right: x + w, bottom: rc.bottom };
+                draw_label(hdc, label, &mut lrc, p.muted, DT_LEFT | DT_VCENTER);
+                x += w + item_gap;
+            }
+        } else if fits_dots {
+            let mut x = rc.right - dots_only_w + item_gap / 2;
+            for (_, color) in legend {
+                draw_dot(hdc, x + dot / 2, cy, dot / 2, color);
+                x += dot + item_gap;
+            }
+        }
+    }
 }
 
 // ---- commands --------------------------------------------------------------
@@ -693,6 +1242,34 @@ pub fn command(app: &mut App, id: u16, code: u16, _ctl: HWND) {
         ID_REMOVE => remove_selected(app),
         ID_LAUNCH => launch_selected(app),
         ID_CANCEL => app.cancel_queue(),
+        ID_JOIN => classic_quick_launch(app),
+        ID_ACCOUNTS_FILE => shell_open(app, &app.data_dir.display().to_string()),
+        ID_OPEN_LOG => {
+            let path = app.log.path().display().to_string();
+            shell_open(app, &path);
+        }
+        ID_COOKIE_SET => {
+            if let Some(id) = single(app) {
+                app.set_cookie(id);
+                refresh_details(app);
+            }
+        }
+        ID_COOKIE_REVEAL => {
+            if let Some(id) = single(app) {
+                app.reveal_cookie(id);
+            }
+        }
+        ID_COOKIE_COPY => {
+            if let Some(id) = single(app) {
+                app.copy_cookie(id);
+            }
+        }
+        ID_COOKIE_REMOVE => {
+            if let Some(id) = single(app) {
+                app.remove_cookie(id);
+                refresh_details(app);
+            }
+        }
         ID_RECOVER => {
             if let Some(id) = single(app) {
                 let state = app.store.account(id).map(|a| a.sign_in.state).unwrap_or_default();
@@ -771,6 +1348,52 @@ pub fn command(app: &mut App, id: u16, code: u16, _ctl: HWND) {
         }
         _ => {}
     }
+}
+
+/// Opens a file or folder with its default handler. Never fails hard.
+fn shell_open(app: &App, path: &str) {
+    let wide = ui::wide(path);
+    // A failure (a value of 32 or below) is left silent on purpose.
+    let _ = unsafe { ShellExecuteW(Some(app.hwnd), w!("open"), PCWSTR(wide.as_ptr()), None, None, SW_SHOWNORMAL) };
+}
+
+/// Classic quick-launch: launches the selection to the pasted place/job, or
+/// to the destination combo when the fields are empty.
+fn classic_quick_launch(app: &mut App) {
+    let ids = selected_ids(app);
+    if ids.is_empty() {
+        app.set_status("Select one or more accounts to launch.");
+        return;
+    }
+    let place = ui::get_text(app.accounts.place_edit).trim().to_string();
+    let job = ui::get_text(app.accounts.job_edit).trim().to_string();
+    let target = if place.is_empty() {
+        match selected_target(app) {
+            Some(t) => t,
+            None => {
+                app.set_status("Enter a place ID or choose a destination to launch to.");
+                return;
+            }
+        }
+    } else {
+        let input = if job.is_empty() {
+            place.clone()
+        } else {
+            format!("https://www.roblox.com/games/start?placeId={place}&gameInstanceId={job}")
+        };
+        match links::parse_destination(&input) {
+            Ok(t) => t,
+            Err(e) => {
+                app.set_status(&e.to_string());
+                return;
+            }
+        }
+    };
+    let targets = if ids.len() > 1 { search::batch_targets(&app.store, &ids) } else { ids.clone() };
+    if ids.len() > 1 && targets.len() != ids.len() {
+        app.set_status("Main was left out of the batch.");
+    }
+    app.launch(&targets, &target);
 }
 
 /// The user reports that Roblox asked for verification: the state changes
@@ -1033,6 +1656,7 @@ pub fn notify(app: &mut App, hdr: &NMHDR, lparam: LPARAM) -> Option<LRESULT> {
             // Selection changes arrive in bursts (and continuously while an
             // arrow key is held); the details pane updates once they settle.
             if !app.accounts.loading {
+                ui::invalidate(app.accounts.legend);
                 unsafe {
                     SetTimer(Some(app.hwnd), TIMER_DETAILS, 15, None);
                 }
@@ -1041,14 +1665,25 @@ pub fn notify(app: &mut App, hdr: &NMHDR, lparam: LPARAM) -> Option<LRESULT> {
         }
         LVN_COLUMNCLICK => unsafe {
             let info = &*(lparam.0 as *const NMLISTVIEW);
-            let key = match info.iSubItem {
-                0 => SortKey::Default,
-                1 => SortKey::Name,
-                2 => SortKey::Username,
-                3 => SortKey::Group,
-                5 => SortKey::SignIn,
-                7 => SortKey::LastUsed,
-                _ => return Some(LRESULT(0)),
+            let key = if is_classic(app) {
+                match info.iSubItem {
+                    0 => SortKey::Default,
+                    1 => SortKey::Username,
+                    2 => SortKey::Name,
+                    3 => SortKey::Group,
+                    4 => SortKey::SignIn,
+                    _ => return Some(LRESULT(0)),
+                }
+            } else {
+                match info.iSubItem {
+                    0 => SortKey::Default,
+                    1 => SortKey::Name,
+                    2 => SortKey::Username,
+                    3 => SortKey::Group,
+                    5 => SortKey::SignIn,
+                    7 => SortKey::LastUsed,
+                    _ => return Some(LRESULT(0)),
+                }
             };
             if app.accounts.sort == key {
                 app.accounts.descending = !app.accounts.descending;
@@ -1107,21 +1742,11 @@ pub fn notify(app: &mut App, hdr: &NMHDR, lparam: LPARAM) -> Option<LRESULT> {
             let cd = &mut *(lparam.0 as *mut NMLVCUSTOMDRAW);
             const PREPAINT: u32 = 0x1;
             const ITEM_PREPAINT: u32 = 0x10001;
-            const SUBITEM_PREPAINT: u32 = 0x30001;
             match cd.nmcd.dwDrawStage.0 {
                 PREPAINT => Some(LRESULT(CDRF_NOTIFYITEMDRAW as isize)),
-                ITEM_PREPAINT => Some(LRESULT(CDRF_NOTIFYSUBITEMDRAW as isize)),
-                SUBITEM_PREPAINT => {
-                    let account = app.accounts.rows.get(cd.nmcd.dwItemSpec).and_then(|id| app.store.account(*id));
-                    let tone = match (cd.iSubItem, account) {
-                        (5, Some(a)) => tone_for_sign_in(a.sign_in.state),
-                        (6, Some(a)) => tone_for_client(&app.clients.state(a.id)),
-                        (0, Some(a)) if app.store.is_main(a.id) => Tone::Good,
-                        (2, _) | (3, _) | (4, _) | (7, _) => Tone::Muted,
-                        _ => Tone::Text,
-                    };
-                    cd.clrText = COLORREF(tone_color(&app.palette, tone));
-                    Some(LRESULT(CDRF_NEWFONT as isize))
+                ITEM_PREPAINT => {
+                    draw_row(app, cd);
+                    Some(LRESULT(CDRF_SKIPDEFAULT as isize))
                 }
                 _ => Some(LRESULT(0)),
             }
@@ -1195,13 +1820,18 @@ pub fn pre_translate(msg: &MSG) -> bool {
         return false;
     }
     let key = msg.wParam.0 as u16;
-    let v = &app.accounts;
+    let (list, search, place_edit, job_edit) =
+        (app.accounts.list, app.accounts.search, app.accounts.place_edit, app.accounts.job_edit);
     if key == VK_RETURN.0 {
-        if msg.hwnd == v.list {
+        if msg.hwnd == place_edit || msg.hwnd == job_edit {
+            classic_quick_launch(app);
+            return true;
+        }
+        if msg.hwnd == list {
             launch_selected(app);
             return true;
         }
-        if msg.hwnd == v.search {
+        if msg.hwnd == search {
             if !app.accounts.rows.is_empty() && selected_ids(app).is_empty() {
                 ui::list_focus_row(app.accounts.list, 0);
             }
@@ -1210,8 +1840,8 @@ pub fn pre_translate(msg: &MSG) -> bool {
         }
     }
     if key == VK_ESCAPE.0 {
-        if !ui::get_text(v.search).is_empty() {
-            ui::set_text(v.search, "");
+        if !ui::get_text(search).is_empty() {
+            ui::set_text(search, "");
             ui::focus(app.accounts.search);
             return true;
         }
