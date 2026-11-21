@@ -12,7 +12,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 /// The GitHub repository releases are published from. The updater reads
 /// `https://github.com/<repo>/releases/latest/download/latest.json`, which
 /// `tauri-action` writes with every release.
-pub const GITHUB_REPO: &str = "claudeoffdaperc30/RAM";
+pub const GITHUB_REPO: &str = "percosz/RAM";
 
 /// The repository's CHANGELOG, embedded so What's new works offline.
 const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
