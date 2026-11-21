@@ -61,7 +61,15 @@ function Shell() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="brand"><span className="logo">R</span><b>RAM</b></div>
+        <div className="brand">
+          <svg className="mark" viewBox="0 0 512 512" aria-hidden>
+            <rect x="16" y="16" width="480" height="480" rx="112" className="mark-bg" />
+            <circle cx="148" cy="156" r="44" className="mark-on" /><rect x="222" y="124" width="198" height="64" rx="32" className="mark-on" />
+            <circle cx="148" cy="256" r="44" className="mark-off" /><rect x="222" y="224" width="198" height="64" rx="32" className="mark-off" />
+            <circle cx="148" cy="356" r="44" className="mark-off" /><rect x="222" y="324" width="138" height="64" rx="32" className="mark-off" />
+          </svg>
+          <b>RAM</b>
+        </div>
         {tabs.map(([id, name, icon]) => (
           <button key={id} className={`nav ${view === id ? "active" : ""}`} onClick={() => setView(id)}>
             {icon} {name}{id === "diagnostics" && crashCount > 0 && <span className="pip" title={`${crashCount} new crash record${crashCount === 1 ? "" : "s"}`} />}

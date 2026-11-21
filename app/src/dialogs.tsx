@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { open as pickDialog } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Download, ExternalLink } from "lucide-react";
-import { api, type PlanView } from "./api";
+import { api, type FoundFile, type PlanView, type QueueEvent } from "./api";
 import { Btn, Field, Modal, Toggle } from "./components";
 import { useApp } from "./store";
 
@@ -66,7 +66,22 @@ export function AddAccountDialog({ onClose, onImport }: { onClose: () => void; o
   const [waiting, setWaiting] = useState<string | null>(null); // browser name while the sign-in window is open
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<import("./api").ManyResult | null>(null);
+  const [savePw, setSavePw] = useState(true);
+  const [queue, setQueue] = useState<QueueEvent | null>(null);   // the sign-in queue's latest state
+  const [queueLog, setQueueLog] = useState<string[]>([]);
   const browser = snap?.browser_name || "";
+  const queueRunning = !!queue && queue.state !== "finished";
+
+  // Follow the username:password queue while it runs.
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    api.onSigninQueue((e) => {
+      setQueue(e);
+      if (e.state === "done" || e.state === "failed" || e.state === "skipped") setQueueLog((l) => [...l, `${e.username}: ${e.state === "done" ? "signed in" : e.message}`].slice(-40));
+      if (e.state === "done" || e.state === "finished") void refresh();
+    }).then((u) => { un = u; });
+    return () => { un?.(); };
+  }, [refresh]);
 
   // Poll the sign-in window until a session is captured or it is closed.
   useEffect(() => {
@@ -109,9 +124,11 @@ export function AddAccountDialog({ onClose, onImport }: { onClose: () => void; o
     setBusy(true); setErr(""); setResult(null); setProgress({ done: 0, total: many.split(/\r?\n/).filter((l) => l.trim()).length });
     const un = await api.onAddManyProgress(setProgress);
     try {
-      const r = await api.addMany(many);
+      setQueueLog([]);
+      const r = await api.addMany(many, savePw);
       setResult(r); await refresh();
       if (r.added + r.refreshed > 0) toast(`Import: ${r.added} added, ${r.refreshed} refreshed${r.failed ? `, ${r.failed} failed` : ""}.`, r.failed ? "warn" : "good");
+      if (r.queued > 0) setQueue({ index: 0, total: r.queued, username: "", state: "opening", message: "Starting the sign-in queue…", done: 0, failed: 0 });
       if (r.failed === 0) { setMany(""); }
     } catch (e) { setErr(errText(e)); } finally { un(); setBusy(false); setProgress(null); }
   };
@@ -122,7 +139,7 @@ export function AddAccountDialog({ onClose, onImport }: { onClose: () => void; o
       footer={<>
         <Btn onClick={close}>{result && result.added + result.refreshed > 0 ? "Done" : "Cancel"}</Btn>
         {tab === "cookie" && <Btn kind="primary" onClick={submitCookie} disabled={busy || cookie.trim().length < 32}>Add</Btn>}
-        {tab === "many" && <Btn kind="primary" onClick={submitMany} disabled={busy || !many.trim()}>{busy && progress ? `Importing ${progress.done} of ${progress.total}…` : "Import"}</Btn>}
+        {tab === "many" && <Btn kind="primary" onClick={submitMany} disabled={busy || queueRunning || !many.trim()}>{busy && progress ? `Importing ${progress.done} of ${progress.total}…` : "Import"}</Btn>}
       </>}>
       <p className="muted" style={{ margin: 0 }}>Cookies are encrypted and stay on this PC. RAM asks Roblox whose session it is, so you never type the username.</p>
       <div className="seg">
@@ -151,16 +168,35 @@ export function AddAccountDialog({ onClose, onImport }: { onClose: () => void; o
         )}
         {tab === "many" && (
           <>
-            <Field label="Cookies, one per line" hint="user:pass:cookie lines from another manager keep only the cookie. username:password lines are skipped: RAM never signs in with passwords; use Sign in with Roblox for those.">
-              <textarea className="textarea mono" rows={7} value={many} onChange={(e) => setMany(e.target.value)} placeholder={"_|WARNING:-DO-NOT-SHARE-THIS…\n_|WARNING:-DO-NOT-SHARE-THIS…"} spellCheck={false} />
+            <Field label="Cookies or username:password, one per line" hint={`Cookies are checked with Roblox and added right away (user:pass:cookie lines keep the cookie). username:password lines are queued: ${browser || "your browser"} opens Roblox's sign-in page for one account at a time, filled in and submitted; solve any check there and RAM saves the session, then moves to the next.`}>
+              <textarea className="textarea mono" rows={6} value={many} onChange={(e) => setMany(e.target.value)} placeholder={"username:password\nusername:password\n_|WARNING:-DO-NOT-SHARE-THIS…"} spellCheck={false} disabled={queueRunning} />
             </Field>
+            <Toggle checked={savePw} onChange={setSavePw} label="Save passwords in the vault" hint="Encrypted like the cookies, so you can copy a password or user:pass later (right-click → Copy). Off: a password only fills in the sign-in form and is forgotten." />
+            {queue && (
+              <div className="gate" style={{ background: "var(--accent-wash)", borderColor: "color-mix(in srgb, var(--accent) 45%, var(--border))" }}>
+                {queueRunning ? (
+                  <>
+                    <div className="row" style={{ gap: 10 }}>
+                      <span className="dot pulse" />
+                      <span className="grow"><b>Signing in {Math.max(1, queue.index)} of {queue.total}{queue.username ? `: ${queue.username}` : ""}</b><br /><span className="muted">{queue.message}</span></span>
+                      <Btn sm onClick={() => api.signinQueueSkip().catch(() => {})} title="Leave this account and go to the next">Skip</Btn>
+                      <Btn sm kind="danger" onClick={() => api.signinQueueStop().catch(() => {})}>Stop</Btn>
+                    </div>
+                    <div className="hint">Closing the browser window also stops the queue. Accounts already signed in stay.</div>
+                  </>
+                ) : (
+                  <div><b>Queue finished:</b> {queue.done} signed in{queue.failed ? `, ${queue.failed} not` : ""}.</div>
+                )}
+                {queueLog.length > 0 && <ul className="hint" style={{ margin: 0, paddingLeft: 18, maxHeight: 96, overflow: "auto" }}>{queueLog.map((l, i) => <li key={i}>{l}</li>)}</ul>}
+              </div>
+            )}
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <Btn onClick={() => { onClose(); onImport(); }}><Download />Import from Roblox Account Manager…</Btn>
               <span className="hint">Its AccountData.json, with its cookies moved into the vault.</span>
             </div>
             {result && (
               <div className="hint">
-                {result.added} added, {result.refreshed} refreshed, {result.repeated} repeated, {result.failed} failed.
+                {result.added} added, {result.refreshed} refreshed, {result.repeated} repeated, {result.failed} failed{result.queued ? `, ${result.queued} queued for sign-in` : ""}.
                 {result.problems.length > 0 && <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{result.problems.slice(0, 12).map((p, i) => <li key={i}>{p}</li>)}{result.problems.length > 12 && <li>…and {result.problems.length - 12} more</li>}</ul>}
               </div>
             )}
@@ -172,7 +208,7 @@ export function AddAccountDialog({ onClose, onImport }: { onClose: () => void; o
   );
 }
 
-export function RevealCookieDialog({ id, name, needPassword, onClose }: { id: number; name: string; needPassword: boolean; onClose: () => void }) {
+export function RevealCookieDialog({ id, name, needPassword, onClose, what = "cookie" }: { id: number; name: string; needPassword: boolean; onClose: () => void; what?: "cookie" | "password" | "userpass" }) {
   const { toast } = useApp();
   const [password, setPassword] = useState("");
   const [cookie, setCookie] = useState<string | null>(null);
@@ -183,12 +219,12 @@ export function RevealCookieDialog({ id, name, needPassword, onClose }: { id: nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const reveal = async (pw?: string) => {
-    try { setCookie(await api.cookieReveal(id, pw)); setErr(""); }
+    try { setCookie(await api.cookieReveal(id, pw, what)); setErr(""); }
     catch (e) { const t = errText(e); if (t === "PASSWORD_REQUIRED") setAskPw(true); else setErr(t); }
   };
-  const copy = async () => { if (cookie) { await writeText(cookie); toast("Cookie copied. Clear your clipboard when done.", "warn"); onClose(); } };
+  const copy = async () => { if (cookie) { await writeText(cookie); toast("Copied. Clear your clipboard when done.", "warn"); onClose(); } };
   return (
-    <Modal title={`Cookie — ${name}`} onClose={onClose} footer={<><Btn onClick={onClose}>Close</Btn>{cookie && <Btn kind="primary" onClick={copy}>Copy</Btn>}</>}>
+    <Modal title={`${what === "cookie" ? "Cookie" : what === "password" ? "Password" : "username:password"} — ${name}`} onClose={onClose} footer={<><Btn onClick={onClose}>Close</Btn>{cookie && <Btn kind="primary" onClick={copy}>Copy</Btn>}</>}>
       {askPw && !cookie && (
         <Field label="Master password"><input className="input" type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && reveal(password)} /></Field>
       )}
@@ -301,49 +337,105 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const [withCookies, setWithCookies] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const pick = async () => {
-    const dir = await pickDialog({ directory: true, title: "Choose the Roblox Account Manager folder" });
-    if (!dir || Array.isArray(dir)) return;
-    setBusy(true);
+  const [found, setFound] = useState<FoundFile[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);   // a password-protected file waiting for its password
+  const [filePw, setFilePw] = useState("");
+  const [usedPw, setUsedPw] = useState<string | undefined>(undefined);
+
+  const scan = async (path: string, password?: string) => {
+    setBusy(true); setErr("");
     try {
-      const p = await api.importScan(dir);
+      const p = await api.importScan(path, password);
+      if (p.needs_password || p.wrong_password) {
+        setPending(path); setPlan(null);
+        if (p.wrong_password) setErr("That password does not open the file.");
+        return;
+      }
+      setPending(null); setUsedPw(password); setFilePw("");
       setPlan(p);
       setSel(new Set(p.items.filter((i) => i.selectable && i.selected).map((i) => i.index)));
     } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  const search = async () => {
+    setSearching(true); setErr("");
+    try { setFound(await api.importFind()); } catch (e) { setErr(errText(e)); } finally { setSearching(false); }
+  };
+  // Look for the file as soon as the dialog opens: most people do not know where it is.
+  useEffect(() => { void search(); }, []);
+  const pickFolder = async () => {
+    const dir = await pickDialog({ directory: true, title: "Choose the Roblox Account Manager folder" });
+    if (dir && !Array.isArray(dir)) void scan(dir);
+  };
+  const pickFile = async () => {
+    const f = await pickDialog({ title: "Choose AccountData.json or its backup", filters: [{ name: "Account data", extensions: ["json", "backup", "bak", "old"] }, { name: "All files", extensions: ["*"] }] });
+    if (f && !Array.isArray(f)) void scan(f);
   };
   const apply = async () => {
     if (!plan) return;
     setBusy(true);
     try {
-      const msg = await api.importApply(plan.folder, [...sel], withCookies && plan.cookies_available > 0);
+      const msg = await api.importApply(plan.folder, [...sel], withCookies && plan.cookies_available + plan.passwords_available > 0, usedPw);
       await refresh(); toast(msg, "good"); onClose();
     } catch (e) { setErr(errText(e)); await refresh(); } finally { setBusy(false); }
   };
   const vaultOk = !!snap?.vault.unlocked;
+  const secrets = plan ? plan.cookies_available + plan.passwords_available : 0;
   // Cookies can be (re)imported for accounts that are already present, so
   // the button stays live when nothing is selected but cookies are wanted.
-  const cookiesOnly = !!plan && sel.size === 0 && withCookies && vaultOk && plan.cookies_available > 0;
+  const cookiesOnly = !!plan && sel.size === 0 && withCookies && vaultOk && secrets > 0;
+  const kindLabel = (k: string) => k === "PasswordProtected" ? "password-protected" : k === "Dpapi" ? "Windows-protected" : k === "Plaintext" ? "not encrypted" : k.toLowerCase();
+  const whenOf = (m: number | null) => m ? new Date(m * 1000).toLocaleDateString() : "";
   return (
     <Modal title="Import from Roblox Account Manager" wide onClose={onClose}
-      footer={<><Btn onClick={onClose}>Cancel</Btn>{plan && <Btn kind="primary" onClick={apply} disabled={busy || (sel.size === 0 && !cookiesOnly)}>{cookiesOnly ? "Import cookies" : `Import ${sel.size}`}</Btn>}</>}>
-      {!plan ? (
+      footer={<><Btn onClick={onClose}>Cancel</Btn>{plan && <Btn onClick={() => { setPlan(null); setErr(""); }}>Back</Btn>}{plan && <Btn kind="primary" onClick={apply} disabled={busy || (sel.size === 0 && !cookiesOnly)}>{cookiesOnly ? "Import cookies" : `Import ${sel.size}`}</Btn>}</>}>
+      {pending ? (
         <>
-          <p className="muted" style={{ margin: 0 }}>Pick the folder that contains <span className="mono">AccountData.json</span>. The folder is only read; nothing in it is changed. You'll see a preview before anything is imported.</p>
-          <Btn kind="primary" onClick={pick} disabled={busy}>Choose folder…</Btn>
+          <p style={{ margin: 0 }}><b>This file is locked with a Roblox Account Manager password.</b></p>
+          <div className="hint mono ellipsis" title={pending}>{pending}</div>
+          <Field label="The password you set in Roblox Account Manager" hint="Used once to read the file; it is not stored. The file itself is not changed.">
+            <input className="input" type="password" autoFocus value={filePw} onChange={(e) => setFilePw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && filePw && scan(pending, filePw)} />
+          </Field>
+          <div className="row" style={{ gap: 8 }}>
+            <Btn kind="primary" disabled={busy || !filePw} onClick={() => scan(pending, filePw)}>{busy ? "Unlocking… (takes a few seconds)" : "Unlock"}</Btn>
+            <Btn onClick={() => { setPending(null); setFilePw(""); setErr(""); }}>Back</Btn>
+          </div>
+        </>
+      ) : !plan ? (
+        <>
+          <p className="muted" style={{ margin: 0 }}>RAM looks for <span className="mono">AccountData.json</span> (and its backup) on this PC. Files are only read; nothing in them is changed, and you see a preview before anything is imported.</p>
+          <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", maxHeight: 230, overflow: "auto" }}>
+            {searching ? <div className="row" style={{ padding: 12, gap: 10 }}><span className="dot pulse" /><span>Searching Desktop, Downloads, Documents and your user folder…</span></div>
+              : !found || found.length === 0 ? <div className="muted" style={{ padding: 12 }}>No AccountData.json found in the usual places. Choose the folder or the file yourself below.</div>
+              : found.map((f) => (
+                <div key={f.path} className="found" onClick={() => !busy && scan(f.path)} title="Preview this file">
+                  <div className="grow" style={{ minWidth: 0 }}>
+                    <div className="ellipsis"><b>{f.path.split(/[\\/]/).slice(-2).join("\\")}</b>{f.is_backup && <span className="badge muted" style={{ marginLeft: 8 }}>backup</span>}{f.kind === "PasswordProtected" && <span className="badge warn" style={{ marginLeft: 8 }}>needs its password</span>}</div>
+                    <div className="hint mono ellipsis">{f.path}</div>
+                  </div>
+                  <div className="hint" style={{ textAlign: "right", whiteSpace: "nowrap" }}>{kindLabel(f.kind)}<br />{whenOf(f.modified)}</div>
+                </div>
+              ))}
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <Btn onClick={search} disabled={searching || busy}>Search again</Btn>
+            <Btn onClick={pickFolder} disabled={busy}>Choose folder…</Btn>
+            <Btn onClick={pickFile} disabled={busy}>Choose file…</Btn>
+          </div>
         </>
       ) : (
         <>
           <div className="row muted" style={{ fontSize: 12 }}>
             <span><b className="good">{plan.add}</b> to add</span><span><b>{plan.update}</b> to update</span><span>{plan.unchanged} present</span><span>{plan.skip} skipped</span>
             <span className="grow" />
-            <span>{plan.cookies_available} cookie{plan.cookies_available === 1 ? "" : "s"} in file</span>
+            <span>{plan.cookies_available} cookie{plan.cookies_available === 1 ? "" : "s"}{plan.passwords_available ? `, ${plan.passwords_available} password${plan.passwords_available === 1 ? "" : "s"}` : ""} in file</span>
           </div>
-          {plan.cookies_available > 0 && (
+          {secrets > 0 && (
             vaultOk
-              ? <Toggle checked={withCookies} onChange={setWithCookies} label={`Also move the ${plan.cookies_available} cookie${plan.cookies_available === 1 ? "" : "s"} into the vault`} hint="Accounts already in RAM get their cookie too, and every account with a cookie is checked right away." />
+              ? <Toggle checked={withCookies} onChange={setWithCookies} label={`Also move the cookies${plan.passwords_available ? " and saved passwords" : ""} into the vault`} hint="Accounts already in RAM get theirs too, and every account with a cookie is checked right away." />
               : <VaultGate what="Imported cookies"><span /></VaultGate>
           )}
-          <div style={{ maxHeight: 340, overflow: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+          <div style={{ maxHeight: 320, overflow: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
             <table className="table">
               <thead><tr><th style={{ width: 32 }}></th><th>Item</th><th>Action</th><th>Details</th></tr></thead>
               <tbody>

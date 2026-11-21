@@ -2,7 +2,7 @@
 // the update offer and the crash counter.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, type Account, type GraphicsSettings, type Settings, type Snapshot } from "./api";
+import { api, type Account, type GraphicsSettings, type LimitSettings, type Settings, type Snapshot } from "./api";
 import type { ToastItem } from "./components";
 
 export interface UpdateOffer {
@@ -23,6 +23,7 @@ interface Ctx {
   refresh: () => Promise<void>;
   saveSettings: (patch: Partial<Settings>) => Promise<void>;
   saveGraphics: (patch: Partial<GraphicsSettings>) => Promise<void>;
+  saveLimits: (patch: Partial<LimitSettings>) => Promise<void>;
   selected: number[];
   setSelected: (ids: number[]) => void;
   toast: (text: string, tone?: ToastItem["tone"]) => void;
@@ -120,6 +121,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSnap((s) => (s ? { ...s, graphics: saved } : s));
   }, [snap]);
 
+  const saveLimits = useCallback(async (patch: Partial<LimitSettings>) => {
+    if (!snap) return;
+    const saved = await api.setLimits({ ...snap.limits, ...patch });
+    setSnap((s) => (s ? { ...s, limits: saved } : s));
+  }, [snap]);
+
   /** Asks GitHub for a newer release. Returns a one-line result for Settings. */
   const checkForUpdate = useCallback(async (manual: boolean): Promise<string> => {
     try {
@@ -160,9 +167,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (pending != null) return;
       pending = window.setTimeout(() => { pending = null; void refresh(); }, 120);
     }).then((u) => unsubs.push(u));
+    // A launch line is cleared when the client is seen (Running) or gone
+    // (Exited), and "Client starting…" never outlives two minutes.
+    const expiry = new Map<number, number>();
+    const clear = (account: number) => setLaunchStatus((m) => { const n = { ...m }; delete n[account]; return n; });
     api.onLaunchStatus((e) => {
+      const old = expiry.get(e.account); if (old) window.clearTimeout(old);
+      if (e.state === "Running" || e.state === "Exited") { clear(e.account); return; }
       setLaunchStatus((m) => ({ ...m, [e.account]: { state: e.state, message: e.message } }));
       if (e.state === "Failed") toast(e.message, "bad");
+      expiry.set(e.account, window.setTimeout(() => clear(e.account), e.state === "Failed" ? 30_000 : 120_000));
     }).then((u) => unsubs.push(u));
     api.onCrashesChanged((n) => setCrashCount((c) => c + n)).then((u) => unsubs.push(u));
     api.onUpdateProgress((p) => setUpdate((u) => (u ? { ...u, state: p.done ? "installing" : "downloading", progress: p.done ? 1 : p.total ? Math.min(1, p.got / p.total) : 0 } : u))).then((u) => unsubs.push(u));
@@ -190,10 +204,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const nameOf = useCallback((username: string) => maskName(username, hideNames), [hideNames]);
 
   const value = useMemo<Ctx>(() => ({
-    snap, accounts: snap?.accounts ?? [], settings: snap?.settings ?? null, refresh, saveSettings, saveGraphics,
+    snap, accounts: snap?.accounts ?? [], settings: snap?.settings ?? null, refresh, saveSettings, saveGraphics, saveLimits,
     selected, setSelected, toast, toasts, dismissToast, launchStatus,
     update, checkForUpdate, installUpdate, dismissUpdate, crashCount, clearCrashCount, nameOf,
-  }), [nameOf, snap, refresh, saveSettings, saveGraphics, selected, toast, toasts, dismissToast, launchStatus, update, checkForUpdate, installUpdate, dismissUpdate, crashCount, clearCrashCount]);
+  }), [nameOf, saveLimits, snap, refresh, saveSettings, saveGraphics, selected, toast, toasts, dismissToast, launchStatus, update, checkForUpdate, installUpdate, dismissUpdate, crashCount, clearCrashCount]);
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }

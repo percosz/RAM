@@ -12,3 +12,5 @@ argon2 = "0.6.0"
 aes-gcm = "0.11.1"
 zeroize = { version = "1.9.2", features = ["derive"] }
 rand = "0.10.4"
+# XSalsa20-Poly1305 (libsodium secretbox), for password-protected legacy account files. Pure Rust.
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { open as pickDialog } from "@tauri-apps/plugin-dialog";
-import { api, type GraphicsSettings, type Msaa, type RenderMode, type Texture, type ThemeKind } from "../api";
+import { api, type BrowserChoice, type GraphicsSettings, type Msaa, type RenderMode, type Texture, type ThemeKind } from "../api";
 import { Btn, Field, Toggle } from "../components";
 import { useApp } from "../store";
 import { ChangePasswordDialog, ConfirmDialog, ImportDialog, VaultSetupDialog } from "../dialogs";
@@ -44,14 +44,26 @@ function Switch({ checked, onChange, disabled }: { checked: boolean; onChange: (
 }
 
 /** Max alts / Balanced / Roblox defaults, modelled on RoALT's presets. */
-const PRESETS: Record<string, Partial<GraphicsSettings>> = {
+const PRESETS: Record<"max" | "balanced" | "defaults", Partial<GraphicsSettings>> = {
   max: { enabled: true, fps_cap: 10, low_graphics: true, lighter_rendering: true, render: { msaa: "X1", texture: "Lowest", mode: "Default", gray_sky: true, no_grass: true, lowest_frm: true, pause_voxelizer: true } },
   balanced: { enabled: true, fps_cap: 30, low_graphics: true, lighter_rendering: true, render: { msaa: "X1", texture: "Lowest", mode: "Default", gray_sky: false, no_grass: true, lowest_frm: true, pause_voxelizer: false } },
-  defaults: { enabled: false, fps_cap: 0, low_graphics: false, lighter_rendering: false },
+  defaults: { enabled: false, fps_cap: 0, low_graphics: false, lighter_rendering: false, mute_volume: false },
 };
 
+/** Which preset the current settings match, or "custom". */
+function presetOf(g: GraphicsSettings): "max" | "balanced" | "defaults" | "custom" {
+  if (!g.enabled) return "defaults";
+  const same = (p: Partial<GraphicsSettings>) => g.fps_cap === p.fps_cap && g.low_graphics === p.low_graphics && g.lighter_rendering === p.lighter_rendering && JSON.stringify(g.render) === JSON.stringify(p.render);
+  return same(PRESETS.max) ? "max" : same(PRESETS.balanced) ? "balanced" : "custom";
+}
+
 export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () => void; onShowUpdate: () => void }) {
-  const { snap, settings, saveSettings, saveGraphics, refresh, toast, update, checkForUpdate } = useApp();
+  const { snap, settings, saveSettings, saveGraphics, saveLimits, refresh, toast, update, checkForUpdate } = useApp();
+  const [browsers, setBrowsers] = useState<BrowserChoice[]>([]);
+  const [bw, setBw] = useState("");
+  const [bwBusy, setBwBusy] = useState(false);
+  useEffect(() => { api.listBrowsers().then(setBrowsers).catch(() => {}); }, []);
+  useEffect(() => { if (snap) setBw(snap.limits.bandwidth_kbps ? String(snap.limits.bandwidth_kbps) : ""); }, [snap?.limits.bandwidth_kbps]);
   const [dlg, setDlg] = useState<null | "setup" | "change" | "removeVault" | "import">(null);
   const [exportCookies, setExportCookies] = useState(false);
   const [checkMsg, setCheckMsg] = useState("");
@@ -60,6 +72,13 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
   if (!snap || !settings) return null;
   const v = snap.vault;
   const g = snap.graphics;
+  const lim = snap.limits;
+  const preset = presetOf(g);
+  const applyBandwidth = async (kbps: number) => {
+    setBwBusy(true);
+    try { await api.applyBandwidth(kbps); await refresh(); toast(kbps ? `Bandwidth limit set to ${kbps} kbit/s.` : "Bandwidth limit removed.", "good"); }
+    catch (e) { toast(String(e), "bad"); } finally { setBwBusy(false); }
+  };
   const hex = settings.accent != null ? "#" + (settings.accent & 0xffffff).toString(16).padStart(6, "0") : "";
   const mainName = snap.accounts.find((a) => a.is_main)?.username;
 
@@ -126,7 +145,16 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
             <input className="input" type="number" min={0} max={120} value={settings.launch_spacing_secs} onChange={(e) => saveSettings({ launch_spacing_secs: Math.max(0, Math.min(120, Number(e.target.value) || 0)) })} />
           </div>
           <Toggle checked={settings.include_main_in_batch} onChange={(c) => saveSettings({ include_main_in_batch: c })} label="Include Main in Select All" />
-          <div className="hint">Launches go through <b>{snap.launcher_name}</b>, the program registered for roblox-player links. Open Browser uses <b>{snap.browser_name || "no usable browser"}</b>{snap.browser_name ? " with a separate profile per account" : " (install Brave, Chrome or Edge)"}.</div>
+          <div className="kv">
+            <span>Browser</span>
+            <select className="select" value={settings.browser} onChange={(e) => saveSettings({ browser: e.target.value })}>
+              <option value="">Windows default{browsers.find((b) => b.is_default) ? ` (${browsers.find((b) => b.is_default)!.name})` : ""}</option>
+              {browsers.map((b) => <option key={b.path} value={b.path}>{b.name}</option>)}
+            </select>
+            <span />
+            <div className="hint">Used for Open Browser and for signing in, with a separate profile per account. "Windows default" follows your default browser each time; pick one to pin it. Now using <b>{snap.browser_name || "none (install Brave, Chrome or Edge)"}</b>.</div>
+          </div>
+          <div className="hint">Launches go through <b>{snap.launcher_name}</b>, the program registered for roblox-player links.</div>
         </div>
       </section>
 
@@ -137,10 +165,13 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
             Lower each alt client's FPS and graphics. The FPS cap and quality go into Roblox's own settings file; rendering flags go into the FastFlag file {snap.launcher_name === "Roblox" ? "next to the client" : `${snap.launcher_name} applies at launch`}. Both are written just before a client starts and put back as soon as it has read them, so your own Roblox keeps its settings.
             {mainName ? <> <b>{mainName}</b> is Main and is never touched.</> : <> Mark your own account as <b>Main</b> so it is never touched.</>}
           </div>
-          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            <Btn sm onClick={() => saveGraphics(PRESETS.max!)}>Max alts (10 FPS, lowest)</Btn>
-            <Btn sm onClick={() => saveGraphics(PRESETS.balanced!)}>Balanced (30 FPS)</Btn>
-            <Btn sm onClick={() => saveGraphics(PRESETS.defaults!)}>Roblox defaults (off)</Btn>
+          <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+            <div className="seg">
+              <button type="button" className={preset === "defaults" ? "active" : ""} onClick={() => saveGraphics(PRESETS.defaults)}>Roblox defaults (off)</button>
+              <button type="button" className={preset === "balanced" ? "active" : ""} onClick={() => saveGraphics(PRESETS.balanced)}>Balanced (30 FPS)</button>
+              <button type="button" className={preset === "max" ? "active" : ""} onClick={() => saveGraphics(PRESETS.max)}>Max alts (10 FPS, lowest)</button>
+              {preset === "custom" && <button type="button" className="active">Your own mix</button>}
+            </div>
           </div>
           <div>
             <PerfRow label="Apply performance settings to alt clients" hint="Off: nothing is written anywhere.">
@@ -172,6 +203,9 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
                 <PerfRow label="Pause lighting updates" hint="Stops voxel lighting updates; lighting can look wrong."><Switch checked={g.render.pause_voxelizer} onChange={(pause_voxelizer) => render({ pause_voxelizer })} /></PerfRow>
               </div>
             )}
+            <PerfRow label="Volume 0" hint="Sets Roblox's own volume to 0 for alt clients, and puts yours back afterwards. Full quality accounts keep their sound.">
+              <Switch checked={g.mute_volume} onChange={(c) => saveGraphics({ mute_volume: c, ...(c && !g.enabled ? { enabled: true } : {}) })} />
+            </PerfRow>
             <PerfRow label="Custom FastFlags" hint="Your own flags, written for every alt client after the ones above (so they win). Applied even for Full quality accounts.">
               {flagsText === null
                 ? <Btn sm onClick={() => setFlagsText(JSON.stringify(g.custom_flags, null, 2))}>Edit… ({Object.keys(g.custom_flags).length})</Btn>
@@ -184,6 +218,40 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
                 <div className="row" style={{ marginTop: 6 }}><Btn sm kind="ghost" onClick={() => { setFlagsText(null); setFlagsErr(""); }}>Cancel</Btn></div>
               </div>
             )}
+          </div>
+        </div>
+      </section>
+
+      <section className="card wide">
+        <div className="card-h">Running clients — windows, sound, CPU, memory, network</div>
+        <div className="card-b">
+          <div className="hint">Applied to alt clients while they run, never to Main or Full quality accounts, and only to clients RAM can tie to an account. Everything is off until you turn it on.</div>
+          <div>
+            <PerfRow label="Minimize on launch" hint="Each alt client minimizes once it has joined a game, without stealing your focus.">
+              <Switch checked={lim.minimize_on_launch} onChange={(c) => saveLimits({ minimize_on_launch: c })} />
+            </PerfRow>
+            <PerfRow label="Start clients tiny" hint="Each alt client's window shrinks to this size once it has joined a game (smaller than Roblox normally allows). A client you restore from minimized grows back.">
+              <input className="input" type="number" min={160} max={1920} value={lim.tiny_width} onChange={(e) => saveLimits({ tiny_width: Number(e.target.value) || 320 })} /><span className="muted">×</span>
+              <input className="input" type="number" min={120} max={1080} value={lim.tiny_height} onChange={(e) => saveLimits({ tiny_height: Number(e.target.value) || 240 })} /><span className="muted">px</span>
+              <Switch checked={lim.tiny_on_launch} onChange={(c) => saveLimits({ tiny_on_launch: c })} />
+            </PerfRow>
+            <PerfRow label="Mute clients on launch" hint="Each alt client is muted in the Windows volume mixer once it has joined a game. Unmute one there.">
+              <Switch checked={lim.mute_on_launch} onChange={(c) => saveLimits({ mute_on_launch: c })} />
+            </PerfRow>
+            <PerfRow label="CPU limit in the background" hint="Caps each alt client that is not the window in front, as a share of the whole processor. The client in front runs free.">
+              <Seg sm value={String(lim.cpu_limit_percent)} options={[["0", "Off"], ["50", "50%"], ["25", "25%"], ["10", "10%"], ["5", "5%"]]} onChange={(v) => saveLimits({ cpu_limit_percent: Number(v) })} />
+            </PerfRow>
+            <PerfRow label="Efficiency mode in the background" hint="Windows' efficiency mode (lower priority, power-saving cores) for alt clients that are not in front.">
+              <Switch checked={lim.efficiency_mode} onChange={(c) => saveLimits({ efficiency_mode: c })} />
+            </PerfRow>
+            <PerfRow label="Trim memory" hint="Pages each alt client's memory out on a schedule; Windows brings back what the client still needs.">
+              <Seg sm value={String(lim.trim_every_min)} options={[["0", "Off"], ["5", "5m"], ["15", "15m"], ["30", "30m"], ["60", "60m"]]} onChange={(v) => saveLimits({ trim_every_min: Number(v) })} />
+            </PerfRow>
+            <PerfRow label="Bandwidth limit" hint={`A Windows network policy for every Roblox client on this PC (Main included), in kilobits per second. Windows asks for administrator approval to set or remove it; it lasts until removed here or the PC restarts. ${lim.bandwidth_kbps ? `Now ${lim.bandwidth_kbps} kbit/s.` : "Now off."}`}>
+              <input className="input" type="number" min={64} placeholder="kbit/s" value={bw} onChange={(e) => setBw(e.target.value)} />
+              <Btn sm disabled={bwBusy || !(Number(bw) >= 64)} onClick={() => applyBandwidth(Number(bw))}>Apply…</Btn>
+              <Btn sm disabled={bwBusy || !lim.bandwidth_kbps} onClick={() => applyBandwidth(0)}>Remove…</Btn>
+            </PerfRow>
           </div>
         </div>
       </section>

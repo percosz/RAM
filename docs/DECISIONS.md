@@ -18,6 +18,33 @@ claims about Roblox, browsers and Windows is in
 Because the two revisions differ by one line in a removed feature, 3.7.2 is
 the migration target: the importer reads what 3.7.2 writes.
 
+## Update 4: passwords, the sign-in queue, client limits (v0.4)
+
+- **RAM now handles Roblox passwords, on request.** Users of the legacy app
+  rely on bulk `username:password` import, so v0.4 adds it, but as a queue:
+  one account at a time in the user's own browser, on Roblox's own sign-in
+  page, filled and submitted over DevTools (`Runtime.evaluate` with the
+  values embedded as JSON literals), with the user solving any check. RAM
+  never posts credentials to Roblox itself. The legacy app opened every
+  account at once; a queue keeps each sign-in looking like a person and lets
+  a wrong password be skipped. Passwords are kept only when "Save passwords"
+  is on, sealed in the vault exactly like cookies and released only through
+  the same Windows Hello / master-password gate.
+- **Password-protected AccountData.json is opened** the way the legacy app
+  does: SHA-512 of the password, Argon2i v1.3 (ops 6, 128 MiB), XSalsa20-
+  Poly1305 secretbox. Verified against a file encrypted by the legacy app's
+  own libsodium.dll. The password is used once and not stored.
+- **Client limits follow RoALT**: minimize without focus, shrink below
+  Roblox's minimum window size by briefly switching the window to a
+  borderless style, mute through the Core Audio session of the process, cap
+  CPU through a job object only while the client is in the background, trim
+  memory on a schedule, and a QoS policy for bandwidth (the only part that
+  needs elevation, and the only part that also affects Main). Clients RAM
+  cannot tie to an account are never limited, because one of them might be
+  Main.
+- **Default browser** is read from `UserChoiceLatest` first: newer Windows 11
+  builds stopped updating `UserChoice`, which made RAM keep the old browser.
+
 ## Update 3: your own browser, light alts, crash history, updates (v0.3)
 
 Driven by use with a real account list (27 accounts imported from the legacy

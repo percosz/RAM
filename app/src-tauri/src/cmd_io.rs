@@ -39,14 +39,81 @@ pub struct PlanView {
     pub skip: usize,
     /// Cookies found in the file (count), importable into the vault.
     pub cookies_available: usize,
+    /// Saved passwords found in the file.
+    pub passwords_available: usize,
+    /// The file is locked with a legacy-app password that was not given.
+    pub needs_password: bool,
+    /// The password given does not open the file.
+    pub wrong_password: bool,
 }
 
-/// Scans a legacy folder and returns the preview plan.
-#[tauri::command]
-pub fn import_scan(state: State<'_, Shared>, folder: String) -> Result<PlanView, String> {
-    let folder = PathBuf::from(&folder);
+#[derive(Serialize)]
+pub struct FoundFileView {
+    pub path: String,
+    /// "Plaintext", "Dpapi" or "PasswordProtected".
+    pub kind: String,
+    pub modified: Option<i64>,
+    pub size: u64,
+    pub is_backup: bool,
+}
+
+/// Looks for the legacy app's `AccountData.json` (and its backups) on this
+/// PC: Desktop, Downloads, Documents and the rest of the user folder first,
+/// then OneDrive and the other drives, within a few seconds. Only file
+/// names and the first bytes are read.
+#[tauri::command(async)]
+pub fn import_find() -> Vec<FoundFileView> {
+    use ram_core::discover;
+    use std::time::{Duration, Instant};
+    let started = Instant::now();
+    let budget = Duration::from_secs(8);
+    let mut found = Vec::new();
+    if let Some(home) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+        let mut roots = discover::default_roots(&home);
+        if let Some(od) = std::env::var_os("OneDrive").map(PathBuf::from) {
+            roots.insert(0, od);
+        }
+        found.extend(discover::find_account_files(&roots, 6, budget));
+    }
+    // Other fixed drives, with whatever time is left.
+    let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into()).to_ascii_uppercase();
+    for letter in b'C'..=b'Z' {
+        let Some(left) = budget.checked_sub(started.elapsed()) else { break };
+        let drive = format!("{}:", letter as char);
+        let rootp = PathBuf::from(format!("{drive}\\"));
+        if drive == system || !rootp.is_dir() {
+            continue;
+        }
+        found.extend(discover::find_account_files(&[rootp], 4, left));
+    }
+    let mut seen = std::collections::HashSet::new();
+    found.retain(|f| seen.insert(f.path.to_string_lossy().to_ascii_lowercase()));
+    found.sort_by_key(|f| std::cmp::Reverse(f.modified.unwrap_or(0)));
+    found
+        .into_iter()
+        .take(50)
+        .map(|f| FoundFileView { path: f.path.display().to_string(), kind: format!("{:?}", f.kind), modified: f.modified, size: f.size, is_backup: f.is_backup })
+        .collect()
+}
+
+/// Scans a legacy folder or account file and returns the preview plan.
+/// `password` opens a file locked with a Roblox Account Manager password.
+#[tauri::command(async)]
+pub fn import_scan(state: State<'_, Shared>, folder: String, password: Option<String>) -> Result<PlanView, String> {
+    let path = PathBuf::from(&folder);
+    let pw = password.as_deref().filter(|p| !p.is_empty());
+    // The scan may run a slow key derivation; do it before taking the lock.
+    let scan = import::scan_path(&path, Some(&LegacyDpapi), pw);
+    let (needs_password, wrong_password) = (scan.needs_password, scan.wrong_password);
+    let (cookies_available, passwords_available) = if needs_password || wrong_password {
+        (0, 0)
+    } else {
+        match import_cookies::read_secrets(&path, Some(&LegacyDpapi), pw) {
+            Ok(v) => (v.iter().filter(|s| !s.cookie.is_empty()).count(), v.iter().filter(|s| !s.password.is_empty()).count()),
+            Err(_) => (0, 0),
+        }
+    };
     let s = lock(&state)?;
-    let scan = import::scan(&folder, Some(&LegacyDpapi));
     let plan = import::plan(&s.store, &scan);
     let (add, update, unchanged, skip) = plan.counts();
     let items = plan
@@ -73,31 +140,37 @@ pub fn import_scan(state: State<'_, Shared>, folder: String) -> Result<PlanView,
             selected: it.selected,
         })
         .collect();
-    let cookies_available = import_cookies::read_cookies(&folder, Some(&LegacyDpapi)).map(|v| v.len()).unwrap_or(0);
-    Ok(PlanView { folder: folder.display().to_string(), items, notices: plan.notices.clone(), add, update, unchanged, skip, cookies_available })
+    Ok(PlanView { folder: path.display().to_string(), items, notices: plan.notices.clone(), add, update, unchanged, skip, cookies_available, passwords_available, needs_password, wrong_password })
 }
 
-/// Applies the plan with the given selection; optionally moves cookies into
-/// the vault for accounts matched by username.
-#[tauri::command]
-pub fn import_apply(app: AppHandle, state: State<'_, Shared>, folder: String, selected: Vec<usize>, with_cookies: bool) -> Result<String, String> {
-    let folder = PathBuf::from(&folder);
+/// Applies the plan with the given selection; optionally moves cookies (and
+/// any saved passwords) into the vault for accounts matched by username or
+/// legacy user id.
+#[tauri::command(async)]
+pub fn import_apply(app: AppHandle, state: State<'_, Shared>, folder: String, selected: Vec<usize>, with_cookies: bool, password: Option<String>) -> Result<String, String> {
+    let path = PathBuf::from(&folder);
+    let pw = password.as_deref().filter(|p| !p.is_empty());
+    let scan = import::scan_path(&path, Some(&LegacyDpapi), pw);
+    if scan.needs_password || scan.wrong_password {
+        return Err("The file's password is needed to import it.".into());
+    }
+    let secrets = if with_cookies { Some(import_cookies::read_secrets(&path, Some(&LegacyDpapi), pw)) } else { None };
     let mut s = lock(&state)?;
-    let scan = import::scan(&folder, Some(&LegacyDpapi));
     let mut plan = import::plan(&s.store, &scan);
     for (i, item) in plan.items.iter_mut().enumerate() {
         item.selected = selected.contains(&i);
     }
     let record = import::apply(&mut s.store, &plan, now());
-    s.store.settings.last_import_dir = folder.display().to_string();
+    s.store.settings.last_import_dir = path.display().to_string();
     let mut cookie_count = 0;
+    let mut password_count = 0;
     let mut to_check: Vec<AccountId> = Vec::new();
-    if with_cookies {
+    if let Some(secrets) = secrets {
         if !s.vault.is_unlocked() {
             s.save();
             return Err("Accounts were imported, but the vault is locked so cookies were not. Unlock it and import again.".into());
         }
-        match import_cookies::read_cookies(&folder, Some(&LegacyDpapi)) {
+        match secrets {
             Ok(list) => {
                 for lc in list {
                     // Match by username, or by the legacy user id for an
@@ -109,16 +182,21 @@ pub fn import_apply(app: AppHandle, state: State<'_, Shared>, folder: String, se
                         .iter()
                         .find(|a| a.username.eq_ignore_ascii_case(&lc.username) || (lc.user_id != 0 && a.import_key.as_deref() == Some(&key)))
                         .map(|a| a.id);
-                    if let Some(id) = id {
-                        if s.vault.set_secret(id, &lc.cookie, &crate::svc::WinEntropy, now()).is_ok() {
-                            cookie_count += 1;
-                            to_check.push(id);
-                            if let Some(a) = s.store.account_mut(id) {
-                                if a.sign_in.detail.starts_with("Imported without credentials") {
-                                    a.sign_in.detail = "Cookie imported; checking…".into();
-                                }
+                    let Some(id) = id else { continue };
+                    if !lc.cookie.is_empty() && s.vault.set_secret(id, &lc.cookie, &crate::svc::WinEntropy, now()).is_ok() {
+                        cookie_count += 1;
+                        to_check.push(id);
+                        if let Some(a) = s.store.account_mut(id) {
+                            if a.method == ram_core::model::SignInMethod::Unknown {
+                                a.method = ram_core::model::SignInMethod::Cookie;
+                            }
+                            if a.sign_in.detail.starts_with("Imported without credentials") {
+                                a.sign_in.detail = "Cookie imported; checking…".into();
                             }
                         }
+                    }
+                    if !lc.password.is_empty() && s.vault.set_password(id, &lc.password, &crate::svc::WinEntropy, now()).is_ok() {
+                        password_count += 1;
                     }
                 }
             }
@@ -128,17 +206,20 @@ pub fn import_apply(app: AppHandle, state: State<'_, Shared>, folder: String, se
             }
         }
     }
+    s.log.info(&format!("import: {} added, {} updated, {} cookies, {} passwords", record.accounts_added, record.accounts_updated, cookie_count, password_count));
     s.save();
     drop(s);
     for id in to_check {
         crate::cmd_launch::start_check(app.clone(), id);
     }
+    let _ = crate::cmd_launch::refresh_avatars(app.clone(), false);
     Ok(format!(
-        "Imported {} account(s), updated {}, skipped {}{}.",
+        "Imported {} account(s), updated {}, skipped {}{}{}.",
         record.accounts_added,
         record.accounts_updated,
         record.skipped,
-        if with_cookies { format!(", {cookie_count} cookie(s) moved into the vault") } else { String::new() }
+        if with_cookies { format!(", {cookie_count} cookie(s) moved into the vault") } else { String::new() },
+        if password_count > 0 { format!(", {password_count} saved password(s)") } else { String::new() }
     ))
 }
 

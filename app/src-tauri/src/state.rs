@@ -26,6 +26,8 @@ pub struct AppState {
     pub checking: HashSet<AccountId>,
     /// Client watcher state (Diagnostics).
     pub diag: crate::cmd_diag::DiagState,
+    /// The username:password sign-in queue.
+    pub signin_queue: crate::cmd_add::SignInQueue,
 }
 
 pub type Shared = Mutex<AppState>;
@@ -94,6 +96,7 @@ impl AppState {
             procs: WinProcesses::new(),
             checking: HashSet::new(),
             diag: Default::default(),
+            signin_queue: Default::default(),
         };
         state.apply_multi_instance();
         state.restore_client_settings();

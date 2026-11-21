@@ -73,6 +73,7 @@ pub fn remove_accounts(state: State<'_, Shared>, ids: Vec<AccountId>) -> Result<
     let mut s = lock(&state)?;
     for id in &ids {
         let _ = s.vault.remove_secret(*id);
+        let _ = s.vault.remove_password(*id);
         s.clients.forget_account(*id);
         if s.store.is_main(*id) {
             s.store.main_account = None;
@@ -134,6 +135,24 @@ pub fn set_graphics(state: State<'_, Shared>, graphics: ram_core::client_setting
     s.store.graphics = g;
     s.save();
     Ok(s.store.graphics.clone())
+}
+
+/// Saves the client limits. The bandwidth limit is a system QoS policy and
+/// is applied separately (`apply_bandwidth`), because it needs an
+/// administrator prompt.
+#[tauri::command]
+pub fn set_limits(state: State<'_, Shared>, limits: ram_core::model::LimitSettings) -> Result<ram_core::model::LimitSettings, String> {
+    let mut s = lock(&state)?;
+    let mut l = limits;
+    l.cpu_limit_percent = l.cpu_limit_percent.min(100);
+    l.trim_every_min = l.trim_every_min.min(720);
+    l.tiny_width = l.tiny_width.clamp(160, 1920);
+    l.tiny_height = l.tiny_height.clamp(120, 1080);
+    // The stored bandwidth value changes only through apply_bandwidth.
+    l.bandwidth_kbps = s.store.limits.bandwidth_kbps;
+    s.store.limits = l;
+    s.save();
+    Ok(s.store.limits.clone())
 }
 
 #[tauri::command]

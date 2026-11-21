@@ -26,6 +26,11 @@ pub struct AccountView {
     pub avatar_url: Option<String>,
     pub fps_cap: Option<u32>,
     pub full_quality: bool,
+    /// A password is stored for this account (it was added by username and
+    /// password, or imported with one).
+    pub has_password: bool,
+    /// "Cookie", "Login" or "Unknown": how the session was obtained.
+    pub method: ram_core::model::SignInMethod,
     /// Client state label: "", Queued, Launching, Running, Unconfirmed, Exited, Failed, Paused.
     pub client: String,
     pub client_pid: Option<u32>,
@@ -48,6 +53,7 @@ pub struct Snapshot {
     pub accounts: Vec<AccountView>,
     pub settings: Settings,
     pub graphics: ram_core::client_settings::GraphicsSettings,
+    pub limits: ram_core::model::LimitSettings,
     pub games: Vec<Game>,
     pub vault: VaultStatus,
     pub main_account: Option<AccountId>,
@@ -129,6 +135,8 @@ pub fn account_view(s: &AppState, id: AccountId) -> Option<AccountView> {
         avatar_url: a.avatar_url.clone(),
         fps_cap: a.fps_cap,
         full_quality: a.full_quality,
+        has_password: s.vault.has_password(a.id),
+        method: a.method,
         client: state.label().to_string(),
         client_pid: s.clients.link_for_account(a.id).map(|l| l.process.pid),
     })
@@ -140,31 +148,33 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         accounts: s.store.accounts.iter().filter_map(|a| account_view(s, a.id)).collect(),
         settings: s.store.settings.clone(),
         graphics: s.store.graphics.clone(),
+        limits: s.store.limits.clone(),
         games: s.store.games.clone(),
         vault: vault_status(s),
         main_account: s.store.main_account,
         multi_instance_held: s.singleton.as_ref().map(|h| h.is_held()).unwrap_or(false),
         startup_note: s.startup_note.clone(),
         data_dir: s.data_dir.display().to_string(),
-        browser_name: environment().0,
-        launcher_name: environment().1,
+        browser_name: environment(&s.store.settings.browser).0,
+        launcher_name: environment(&s.store.settings.browser).1,
         github_repo: crate::cmd_update::GITHUB_REPO.to_string(),
     }
 }
 
 /// Browser and launcher names for the snapshot. Looked up in the registry
 /// at most once a minute: the snapshot is taken on every account event.
-fn environment() -> (String, String) {
+fn environment(choice: &str) -> (String, String) {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
     static CACHE: Mutex<Option<(Instant, String, String)>> = Mutex::new(None);
     if let Ok(mut c) = CACHE.lock() {
         if let Some((at, b, l)) = c.as_ref() {
-            if at.elapsed() < Duration::from_secs(60) {
+            // Short-lived: a new default browser shows up within seconds.
+            if at.elapsed() < Duration::from_secs(5) {
                 return (b.clone(), l.clone());
             }
         }
-        let b = crate::cmd_browser::pick_browser().map(|b| b.name).unwrap_or_default();
+        let b = crate::cmd_browser::pick_browser_for(choice).map(|b| b.name).unwrap_or_default();
         let l = ram_win::launcher_info::detect().name;
         *c = Some((Instant::now(), b.clone(), l.clone()));
         return (b, l);

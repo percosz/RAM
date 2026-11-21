@@ -60,18 +60,26 @@ auto-updater verifies every update against RAM's own release signature.
 - **Multi-instance.** On by default: RAM holds Roblox's single-instance lock
   so more than one client can run. It owns a named Windows object only; it
   does not modify or inject into the client.
+- **Add accounts your way.** Sign in with Roblox in your own browser, paste a
+  cookie, or paste a list: cookies are added at once and `username:password`
+  lines are signed in one at a time through Roblox's own sign-in page, filled
+  in for you. Passwords can be kept in the vault (encrypted) and copied later.
 - **Performance for alts.** An FPS cap, lowest graphics and lighter rendering
   (MSAA, texture quality, rendering mode, gray sky, no grass, lowest render
   quality, paused lighting) plus your own FastFlags, written just before each
   alt client starts and put back once it has read them. Per-account FPS cap
-  and *Full quality*; the **Main** account is never touched. Presets: Max
-  alts, Balanced, Roblox defaults.
+  and *Full quality*; the **Main** account is never touched. Presets: Roblox
+  defaults (the starting point), Balanced, Max alts. Volume 0 is an option.
+- **Running clients.** Minimize on launch, tiny windows, mute, a background
+  CPU limit, efficiency mode, memory trim and a bandwidth limit, for alts
+  only; Minimize all / Restore all with one click.
 - **Diagnostics.** A crash history that says how each client ended
   (disconnected, crashed, replaced, sign-in refused) with the reason from its
   log, and RAM's own log with level filters and a redacted "Copy diagnostics".
-- **Import / export.** Preview-first import from Roblox Account Manager's
-  `AccountData.json`, moving its cookies into the vault (also for accounts you
-  already have); export back out with or without cookies.
+- **Import / export.** RAM finds Roblox Account Manager's `AccountData.json`
+  (or its backup) on your PC, unlocks it if it has a password, shows a
+  preview, and moves its cookies and saved passwords into the vault; export
+  back out with or without cookies.
 - **Themes and rows.** System, Light, Dark, Catppuccin (Mocha, Macchiato,
   Frappé, Latte), Nord, Dracula, Gruvbox, Rosé Pine and a muted Lineage
   palette, an accent colour, corner radius, and four row sizes from Compact
@@ -122,9 +130,12 @@ auto-updater verifies every update against RAM's own release signature.
 - Everything stays in `%LOCALAPPDATA%\RAM`: `store.json` (accounts, settings,
   crash history), `vault.bin` (encrypted cookies), `browser-profiles\` and
   `RAM.log`. Cookies never reach the log or the plain data file.
-- A stored session cookie is as powerful as a password. RAM encrypts cookies at
-  rest and gates reveal/copy behind Windows Hello or the master password, but
-  it cannot protect against malware already running as your Windows user. Use
+- A stored session cookie is as powerful as a password. RAM encrypts cookies
+  (and any passwords you choose to save) at rest and gates copying them behind
+  Windows Hello or the master password, but it cannot protect against malware
+  already running as your Windows user. Passwords are only ever typed into
+  Roblox's own sign-in page in your browser; turn "Save passwords" off and
+  they are forgotten as soon as the form is filled. Use
   the master-password vault on shared machines and keep the recovery code
   offline.
 - Open Browser drives the browser through Chrome's DevTools protocol on a

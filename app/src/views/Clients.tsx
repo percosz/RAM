@@ -21,6 +21,12 @@ export function ClientsView() {
       {rows.length === 0 ? (
         <div className="empty"><div><b>No Roblox clients running.</b><br />Launch an account from Accounts; its client appears here once Windows shows it.</div></div>
       ) : (
+        <>
+        <div className="row" style={{ marginBottom: 10, gap: 8 }}>
+          <Btn sm onClick={async () => { try { toast(`Minimized ${await api.clientsMinimizeAll(true)} client(s).`); } catch (e) { toast(String(e), "bad"); } }}>Minimize all</Btn>
+          <Btn sm onClick={async () => { try { toast(`Restored ${await api.clientsMinimizeAll(false)} client(s).`); } catch (e) { toast(String(e), "bad"); } }}>Restore all</Btn>
+          <span className="hint">Minimizing never steals focus. Main and Full quality accounts are included here; the automatic limits skip them.</span>
+        </div>
         <table className="table">
           <thead><tr><th>Account</th><th>PID</th><th style={{ textAlign: "right" }}>Working set</th><th style={{ textAlign: "right" }}>Private</th><th></th></tr></thead>
           <tbody>
@@ -35,6 +41,7 @@ export function ClientsView() {
             ))}
           </tbody>
         </table>
+        </>
       )}
     </div>
   );

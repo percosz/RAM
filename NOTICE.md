@@ -44,6 +44,7 @@ RoALT's name, logo and distinctive look are not reused; RAM has its own.
 | Crate | Licence | Use |
 |---|---|---|
 | [windows](https://crates.io/crates/windows) (Microsoft) | MIT OR Apache-2.0 | Win32 API bindings |
+| [crypto_secretbox](https://crates.io/crates/crypto_secretbox) | Apache-2.0 OR MIT | Opening password-protected legacy account files |
 | [serde](https://crates.io/crates/serde), [serde_json](https://crates.io/crates/serde_json) and their dependencies (itoa, memchr, zmij or ryu) | MIT OR Apache-2.0 | Data file format |
 | [argon2](https://crates.io/crates/argon2) | MIT OR Apache-2.0 | Master-password key derivation (vault) |
 | [aes-gcm](https://crates.io/crates/aes-gcm) | Apache-2.0 OR MIT | Cookie encryption (vault) |
@@ -60,6 +61,7 @@ The exact versions are pinned in `Cargo.lock` and `app/package-lock.json`.
 
 Roblox is a trademark of Roblox Corporation. Rogue Lineage is the work of
 its developers. RAM is not affiliated with, endorsed by or sponsored by
-either. It does not modify the Roblox client and never handles Roblox
-passwords. It stores Roblox session cookies only when you choose to, encrypted
-at rest with Windows data protection or a master password.
+either. It does not modify the Roblox client. It stores Roblox session cookies, and
+Roblox passwords only when you choose to save them, encrypted at rest with
+Windows data protection or a master password; a password is only ever typed
+into Roblox's own sign-in page in your browser.

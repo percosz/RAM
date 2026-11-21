@@ -8,15 +8,24 @@
 //! reviews the plan → `apply`.
 //!
 //! File formats are documented in `docs/LEGACY_AUDIT.md`, sections 4 to 6.
+//!
+//! All three storage variants of the account file are read: plaintext, DPAPI
+//! (through a `LegacyDecryptor`) and password-protected (`scan_path` with the
+//! password, see `decrypt_password_file`). A decrypted payload goes through
+//! the same allow-list parser and is wiped afterwards.
 
 use crate::links;
 use crate::model::{Account, Destination, Game, ImportRecord, Store, Target};
 use crate::signin;
+use argon2::{Algorithm, Argon2, Params, Version};
+use crypto_secretbox::aead::{Aead, KeyInit};
+use crypto_secretbox::XSalsa20Poly1305;
 use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use std::collections::HashSet;
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use zeroize::Zeroizing;
 
 /// The 64-byte header of a password-protected `AccountData.json`
 /// (`Cryptography.RAMHeader` in the legacy source).
@@ -36,6 +45,28 @@ const DPAPI_MAGIC: [u8; 20] = [
 pub const MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
 
 const ACCOUNT_FILE: &str = "AccountData.json";
+
+/// What the legacy app appends to `AccountData.json` for the copies it keeps
+/// next to it (`AccountManager.cs` in the legacy source): `.backup` is the
+/// previous contents, refreshed at most every 8 hours (lines 368-371); `.bak`
+/// is the raw file when loading it failed (line 300); `.old` is the file a
+/// restored password-locked backup replaced (lines 317-320). Each is stored
+/// like an account file, in any of the three variants.
+pub const ACCOUNT_BACKUP_SUFFIXES: [&str; 3] = [".backup", ".bak", ".old"];
+
+/// Whether a file name is the legacy account file (`Some(false)`) or one of
+/// its backups (`Some(true)`), ignoring ASCII case. `None` for anything else.
+pub fn match_account_file_name(name: &str) -> Option<bool> {
+    let split = ACCOUNT_FILE.len();
+    if !name.is_char_boundary(split) || !name[..split].eq_ignore_ascii_case(ACCOUNT_FILE) {
+        return None;
+    }
+    let suffix = &name[split..];
+    if suffix.is_empty() {
+        return Some(false);
+    }
+    ACCOUNT_BACKUP_SUFFIXES.iter().any(|s| suffix.eq_ignore_ascii_case(s)).then_some(true)
+}
 const SETTINGS_FILE: &str = "RAMSettings.ini";
 const RECENT_FILE: &str = "RecentGames.json";
 const FAVORITES_FILE: &str = "FavoriteGames.json";
@@ -76,6 +107,176 @@ pub fn detect_account_file(bytes: &[u8]) -> AccountFileKind {
         Some(b'[') => AccountFileKind::Plaintext,
         _ => AccountFileKind::Unrecognised,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Password-protected account files
+//
+// `Classes/Cryptography.cs` in the legacy source, with libsodium-net 0.10.0
+// (`RBX Alt Manager/packages.config`) on libsodium 1.0.11:
+//
+//   file = header (64) | salt (16) | nonce (24) | crypto_secretbox_easy(json)
+//   key  = crypto_pwhash(32, pw, salt, opslimit 6, memlimit 134217728, alg 1)
+//   pw   = crypto_hash(UTF-8 of the typed password)          (SHA-512, 64 bytes)
+//
+// `PasswordHash.ArgonHashBinary(pw, salt, StrengthArgon.Moderate, 32)` passes
+// `ARGON_OPSLIMIT_MODERATE = 6`, `ARGON_MEMLIMIT_MODERATE = 134217728` and
+// `ARGON_ALGORITHM_DEFAULT = 1`, which is `crypto_pwhash_ALG_ARGON2I13`:
+// Argon2i version 1.3 with one lane (libsodium-net `PasswordHash.cs` at tag
+// v0.10.0, lines 14-24, 134 and 178-180). The password bytes are
+// `CryptoHash.Hash(PasswordTextBox.Text)` (`AccountManager.cs:422, 492`).
+
+const SALT_LEN: usize = 16;
+const NONCE_LEN: usize = 24;
+const MAC_LEN: usize = 16;
+const KEY_LEN: usize = 32;
+/// `StrengthArgon.Moderate`: 6 passes over 128 MiB (in KiB here).
+const ARGON_MODERATE_PASSES: u32 = 6;
+const ARGON_MODERATE_KIB: u32 = 134_217_728 / 1024;
+
+/// Why a password-protected account file could not be opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordFileError {
+    /// The bytes do not start with the password-mode header.
+    NotPasswordFile,
+    /// The authentication check failed. That is what a wrong password looks
+    /// like; a file altered after it was written fails the same way.
+    WrongPassword,
+    /// Too short to hold a salt, a nonce and an authentication tag.
+    Malformed,
+}
+
+impl fmt::Display for PasswordFileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            PasswordFileError::NotPasswordFile => "the file is not password-protected",
+            PasswordFileError::WrongPassword => "the password is wrong",
+            PasswordFileError::Malformed => "the password-protected file is damaged or incomplete",
+        })
+    }
+}
+
+impl std::error::Error for PasswordFileError {}
+
+/// Decrypts a password-protected `AccountData.json` and returns its payload,
+/// the UTF-8 JSON account list **including cookies and passwords**. The
+/// caller overwrites the returned buffer when done with it.
+///
+/// The password is used exactly as typed (the legacy app does not trim it).
+/// Key derivation holds 128 MiB for its duration and takes on the order of a
+/// second.
+pub fn decrypt_password_file(bytes: &[u8], password: &str) -> Result<Vec<u8>, PasswordFileError> {
+    let Some(rest) = bytes.strip_prefix(&PASSWORD_HEADER[..]) else {
+        return Err(PasswordFileError::NotPasswordFile);
+    };
+    if rest.len() < SALT_LEN + NONCE_LEN + MAC_LEN {
+        return Err(PasswordFileError::Malformed);
+    }
+    let (salt, rest) = rest.split_at(SALT_LEN);
+    let (nonce, boxed) = rest.split_at(NONCE_LEN);
+
+    let hashed = sha512(password.as_bytes());
+    #[cfg(not(test))]
+    let key = derive_key(&hashed[..], salt)?;
+    // Unoptimised, a derivation takes many seconds: the tests share them.
+    #[cfg(test)]
+    let key = test_vectors::derive_key_once(&hashed[..], salt)?;
+
+    // libsodium's "easy" layout, tag first, is what this cipher reads.
+    XSalsa20Poly1305::new_from_slice(&key[..])
+        .map_err(|_| PasswordFileError::Malformed)?
+        .decrypt(crypto_secretbox::Nonce::from_slice(nonce), boxed)
+        .map_err(|_| PasswordFileError::WrongPassword)
+}
+
+/// Argon2i v1.3 at `StrengthArgon.Moderate`, over the hashed password.
+fn derive_key(hashed: &[u8], salt: &[u8]) -> Result<Zeroizing<[u8; KEY_LEN]>, PasswordFileError> {
+    let mut key = Zeroizing::new([0u8; KEY_LEN]);
+    let params = Params::new(ARGON_MODERATE_KIB, ARGON_MODERATE_PASSES, 1, Some(KEY_LEN))
+        .map_err(|_| PasswordFileError::Malformed)?;
+    Argon2::new(Algorithm::Argon2i, Version::V0x13, params)
+        .hash_password_into(hashed, salt, &mut key[..])
+        .map_err(|_| PasswordFileError::Malformed)?;
+    Ok(key)
+}
+
+/// SHA-512 (FIPS 180-4), which is what libsodium's `crypto_hash` is. Only
+/// used to turn the typed password into the bytes the legacy app feeds to
+/// Argon2.
+fn sha512(data: &[u8]) -> Zeroizing<[u8; 64]> {
+    #[rustfmt::skip]
+    const K: [u64; 80] = [
+        0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc,
+        0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118,
+        0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2,
+        0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694,
+        0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65,
+        0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5,
+        0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4,
+        0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70,
+        0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df,
+        0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b,
+        0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30,
+        0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8,
+        0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8,
+        0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3,
+        0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec,
+        0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b,
+        0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178,
+        0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b,
+        0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c,
+        0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817,
+    ];
+    let mut state = Zeroizing::new([
+        0x6a09e667f3bcc908u64,
+        0xbb67ae8584caa73b,
+        0x3c6ef372fe94f82b,
+        0xa54ff53a5f1d36f1,
+        0x510e527fade682d1,
+        0x9b05688c2b3e6c1f,
+        0x1f83d9abfb41bd6b,
+        0x5be0cd19137e2179,
+    ]);
+
+    // Sized up front so that the copy of the input is never reallocated.
+    let mut padded = Zeroizing::new(Vec::with_capacity(data.len() + 144));
+    padded.extend_from_slice(data);
+    padded.push(0x80);
+    while padded.len() % 128 != 112 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&(data.len() as u128 * 8).to_be_bytes());
+
+    let mut w = Zeroizing::new([0u64; 80]);
+    for block in padded.chunks_exact(128) {
+        for (word, bytes) in w.iter_mut().zip(block.chunks_exact(8)) {
+            *word = bytes.iter().fold(0u64, |acc, b| acc << 8 | u64::from(*b));
+        }
+        for i in 16..80 {
+            let s0 = w[i - 15].rotate_right(1) ^ w[i - 15].rotate_right(8) ^ (w[i - 15] >> 7);
+            let s1 = w[i - 2].rotate_right(19) ^ w[i - 2].rotate_right(61) ^ (w[i - 2] >> 6);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
+        for (k, word) in K.iter().zip(w.iter()) {
+            let s1 = e.rotate_right(14) ^ e.rotate_right(18) ^ e.rotate_right(41);
+            let ch = (e & f) ^ (!e & g);
+            let t1 = h.wrapping_add(s1).wrapping_add(ch).wrapping_add(*k).wrapping_add(*word);
+            let s0 = a.rotate_right(28) ^ a.rotate_right(34) ^ a.rotate_right(39);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            (h, g, f, e) = (g, f, e, d.wrapping_add(t1));
+            (d, c, b, a) = (c, b, a, t1.wrapping_add(s0.wrapping_add(maj)));
+        }
+        for (sum, v) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+            *sum = sum.wrapping_add(v);
+        }
+    }
+
+    let mut out = Zeroizing::new([0u8; 64]);
+    for (bytes, word) in out.chunks_exact_mut(8).zip(state.iter()) {
+        bytes.copy_from_slice(&word.to_be_bytes());
+    }
+    out
 }
 
 /// One legacy account, without its cookie or password.
@@ -145,6 +346,12 @@ pub struct LegacyGame {
 pub struct Scan {
     pub folder: PathBuf,
     pub account_file: AccountFileKind,
+    /// The account file is password-protected and no password was given, so
+    /// its accounts are not in this scan. Scan again with the password.
+    pub needs_password: bool,
+    /// The account file is password-protected and the given password did not
+    /// open it, so its accounts are not in this scan.
+    pub wrong_password: bool,
     /// In legacy display order.
     pub accounts: Vec<LegacyAccount>,
     pub destinations: Vec<LegacyDestination>,
@@ -158,7 +365,39 @@ pub struct Scan {
 /// deletes anything in the folder. A missing or malformed file produces a
 /// notice and the rest still imports.
 pub fn scan(folder: &Path, decryptor: Option<&dyn LegacyDecryptor>) -> Scan {
-    scan_inner(folder, &|name| read_file(&folder.join(name)), decryptor)
+    let read = |name: &str| read_file(&folder.join(name));
+    scan_inner(folder, ACCOUNT_FILE, read(ACCOUNT_FILE), &read, decryptor, None)
+}
+
+/// Like `scan`, for a path that is either the legacy folder or an account
+/// file in it: `AccountData.json`, one of its backups (see
+/// `ACCOUNT_BACKUP_SUFFIXES`) or a copy under any other name. The other
+/// legacy files are looked up in the folder that holds the account file.
+///
+/// `password` opens a password-protected account file; it is ignored for the
+/// other variants. Without one (`None` or empty) such a file sets
+/// `Scan::needs_password`; with one that does not open it,
+/// `Scan::wrong_password`. Either way the rest still imports.
+pub fn scan_path(path: &Path, decryptor: Option<&dyn LegacyDecryptor>, password: Option<&str>) -> Scan {
+    let (folder, file) = account_location(path);
+    let name = file.file_name().map_or_else(|| ACCOUNT_FILE.to_string(), |n| n.to_string_lossy().into_owned());
+    let read = |name: &str| read_file(&folder.join(name));
+    scan_inner(&folder, &name, read_file(&file), &read, decryptor, password)
+}
+
+/// Splits a path the user picked into the legacy folder and the account
+/// file to read. A directory is the folder itself; an existing file, or a
+/// missing one that is named like an account file, is that file in its
+/// parent folder; anything else is taken as a (missing) folder.
+pub(crate) fn account_location(path: &Path) -> (PathBuf, PathBuf) {
+    let named_like_one =
+        || path.file_name().and_then(|n| n.to_str()).is_some_and(|n| match_account_file_name(n).is_some());
+    if !path.is_dir() && (path.is_file() || named_like_one()) {
+        if let Some(parent) = path.parent() {
+            return (parent.to_path_buf(), path.to_path_buf());
+        }
+    }
+    (path.to_path_buf(), path.join(ACCOUNT_FILE))
 }
 
 /// Same as `scan`, from in-memory file contents (file name → bytes).
@@ -167,7 +406,8 @@ pub fn scan_files(
     files: &dyn Fn(&str) -> Option<Vec<u8>>,
     decryptor: Option<&dyn LegacyDecryptor>,
 ) -> Scan {
-    scan_inner(folder, &|name| files(name).map_or(FileRead::Missing, FileRead::Data), decryptor)
+    let read = |name: &str| files(name).map_or(FileRead::Missing, FileRead::Data);
+    scan_inner(folder, ACCOUNT_FILE, read(ACCOUNT_FILE), &read, decryptor, None)
 }
 
 enum FileRead {
@@ -193,16 +433,27 @@ fn read_file(path: &Path) -> FileRead {
     }
 }
 
-fn scan_inner(folder: &Path, read: &dyn Fn(&str) -> FileRead, decryptor: Option<&dyn LegacyDecryptor>) -> Scan {
+/// `account_name` and `account_data` are the account file, which need not be
+/// called `AccountData.json`; `read` fetches the other files by name.
+fn scan_inner(
+    folder: &Path,
+    account_name: &str,
+    account_data: FileRead,
+    read: &dyn Fn(&str) -> FileRead,
+    decryptor: Option<&dyn LegacyDecryptor>,
+    password: Option<&str>,
+) -> Scan {
     let mut scan = Scan {
         folder: folder.to_path_buf(),
         account_file: AccountFileKind::Missing,
+        needs_password: false,
+        wrong_password: false,
         accounts: Vec::new(),
         destinations: Vec::new(),
         games: Vec::new(),
         notices: Vec::new(),
     };
-    scan_accounts(&mut scan, read, decryptor);
+    scan_accounts(&mut scan, account_name, account_data, decryptor, password);
     scan_recent(&mut scan, read);
     scan_favorites(&mut scan, read);
     scan_control(&mut scan, read);
@@ -228,17 +479,23 @@ const KNOWN_FIELDS: &[&str] = &[
     "Window_Height",
 ];
 
-fn scan_accounts(scan: &mut Scan, read: &dyn Fn(&str) -> FileRead, decryptor: Option<&dyn LegacyDecryptor>) {
-    let mut bytes = match read(ACCOUNT_FILE) {
+fn scan_accounts(
+    scan: &mut Scan,
+    name: &str,
+    data: FileRead,
+    decryptor: Option<&dyn LegacyDecryptor>,
+    password: Option<&str>,
+) {
+    let mut bytes = match data {
         FileRead::Missing => {
             scan.notices.push(format!(
-                "{ACCOUNT_FILE} was not found in this folder, so no accounts are imported. {REST_IMPORTS}"
+                "{name} was not found in this folder, so no accounts are imported. {REST_IMPORTS}"
             ));
             return;
         }
         FileRead::Unreadable(why) => {
             scan.notices.push(format!(
-                "{ACCOUNT_FILE} could not be read ({why}), so no accounts are imported. {REST_IMPORTS}"
+                "{name} could not be read ({why}), so no accounts are imported. {REST_IMPORTS}"
             ));
             return;
         }
@@ -247,7 +504,7 @@ fn scan_accounts(scan: &mut Scan, read: &dyn Fn(&str) -> FileRead, decryptor: Op
     if bytes.len() > MAX_FILE_BYTES {
         scan.account_file = AccountFileKind::Unrecognised;
         scan.notices.push(format!(
-            "{ACCOUNT_FILE} is larger than 64 MiB and was skipped, so no accounts are imported. {REST_IMPORTS}"
+            "{name} is larger than 64 MiB and was skipped, so no accounts are imported. {REST_IMPORTS}"
         ));
         wipe(&mut bytes);
         return;
@@ -255,39 +512,60 @@ fn scan_accounts(scan: &mut Scan, read: &dyn Fn(&str) -> FileRead, decryptor: Op
 
     scan.account_file = detect_account_file(&bytes);
     match scan.account_file {
-        AccountFileKind::Plaintext => parse_accounts(scan, &bytes),
+        AccountFileKind::Plaintext => parse_accounts(scan, name, &bytes),
         AccountFileKind::Dpapi => match decryptor.map(|d| d.unprotect(&bytes, LEGACY_DPAPI_ENTROPY)) {
             Some(Ok(mut plain)) => {
-                parse_accounts(scan, &plain);
+                parse_accounts(scan, name, &plain);
                 wipe(&mut plain);
             }
             // The decryptor's message is not shown: it is not ours to vouch for.
             Some(Err(_)) => scan.notices.push(format!(
-                "{ACCOUNT_FILE} is encrypted by Windows and could not be decrypted. It can only be decrypted on \
+                "{name} is encrypted by Windows and could not be decrypted. It can only be decrypted on \
                  the PC that wrote it, so no accounts are imported here. {REST_IMPORTS}"
             )),
             None => scan.notices.push(format!(
-                "{ACCOUNT_FILE} is encrypted by Windows and can only be decrypted on the PC that wrote it. \
+                "{name} is encrypted by Windows and can only be decrypted on the PC that wrote it. \
                  Decryption is not available here, so no accounts are imported. {REST_IMPORTS}"
             )),
         },
-        AccountFileKind::PasswordProtected => scan.notices.push(format!(
-            "{ACCOUNT_FILE} is password-protected and cannot be read by this version, so no accounts are \
-             imported. {REST_IMPORTS} To import the accounts, remove the password in the legacy app (or export \
-             the account list without one) and import again."
-        )),
+        AccountFileKind::PasswordProtected => match password.filter(|p| !p.is_empty()) {
+            None => {
+                scan.needs_password = true;
+                scan.notices.push(format!(
+                    "{name} is password-protected, so no accounts are imported yet. {REST_IMPORTS} To import the \
+                     accounts, enter the password (or remove the password in the legacy app and import again)."
+                ));
+            }
+            Some(password) => match decrypt_password_file(&bytes, password) {
+                Ok(mut plain) => {
+                    parse_accounts(scan, name, &plain);
+                    wipe(&mut plain);
+                }
+                Err(PasswordFileError::WrongPassword) => {
+                    scan.wrong_password = true;
+                    scan.notices.push(format!(
+                        "{name} is password-protected and that password did not open it, so no accounts are \
+                         imported. {REST_IMPORTS}"
+                    ));
+                }
+                Err(_) => scan.notices.push(format!(
+                    "{name} is password-protected but damaged or incomplete, so no accounts are imported. \
+                     {REST_IMPORTS}"
+                )),
+            },
+        },
         AccountFileKind::Missing | AccountFileKind::Unrecognised => scan.notices.push(format!(
-            "{ACCOUNT_FILE} is not in a recognised format, so no accounts are imported. {REST_IMPORTS}"
+            "{name} is not in a recognised format, so no accounts are imported. {REST_IMPORTS}"
         )),
     }
     wipe(&mut bytes);
 }
 
-fn parse_accounts(scan: &mut Scan, payload: &[u8]) {
+fn parse_accounts(scan: &mut Scan, name: &str, payload: &[u8]) {
     let rows = match parse_array(payload, ACCOUNT_KEYS) {
         Ok(rows) => rows,
         Err(problem) => {
-            scan.notices.push(format!("{ACCOUNT_FILE} {problem}, so no accounts are imported. {REST_IMPORTS}"));
+            scan.notices.push(format!("{name} {problem}, so no accounts are imported. {REST_IMPORTS}"));
             return;
         }
     };
@@ -323,10 +601,10 @@ fn parse_accounts(scan: &mut Scan, payload: &[u8]) {
             saved_skip_reason,
         });
     }
-    note_non_objects(&mut scan.notices, ACCOUNT_FILE, not_objects);
+    note_non_objects(&mut scan.notices, name, not_objects);
     if custom_fields > 0 {
         scan.notices.push(format!(
-            "{custom_fields} custom account field{} in {ACCOUNT_FILE} {} not imported.",
+            "{custom_fields} custom account field{} in {name} {} not imported.",
             plural(custom_fields),
             if custom_fields == 1 { "is" } else { "are" }
         ));
@@ -1229,8 +1507,62 @@ pub fn apply(store: &mut Store, plan: &ImportPlan, now: i64) -> ImportRecord {
     record
 }
 
+/// A password-protected account file produced by the legacy app's own
+/// native library, for the tests here and in `import_cookies`.
+#[cfg(test)]
+pub(crate) mod test_vectors {
+    use super::{derive_key, PasswordFileError, KEY_LEN};
+    use std::sync::Mutex;
+    use zeroize::Zeroizing;
+
+    /// `derive_key`, one call at a time and once per input, for every test in
+    /// the crate: a derivation holds 128 MiB and is slow in a test build.
+    pub(crate) fn derive_key_once(hashed: &[u8], salt: &[u8]) -> Result<Zeroizing<[u8; KEY_LEN]>, PasswordFileError> {
+        type Derived = (Vec<u8>, Vec<u8>, [u8; KEY_LEN]);
+        static DERIVED: Mutex<Vec<Derived>> = Mutex::new(Vec::new());
+        let mut derived = DERIVED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, _, key)) = derived.iter().find(|(h, s, _)| h == hashed && s == salt) {
+            return Ok(Zeroizing::new(*key));
+        }
+        let key = derive_key(hashed, salt)?;
+        derived.push((hashed.to_vec(), salt.to_vec(), *key));
+        Ok(key)
+    }
+
+    pub(crate) const VECTOR_PASSWORD: &str = "correct horse";
+
+    /// Differs by a trailing space: the password is taken as typed. The
+    /// tests that need a wrong password all use this one.
+    pub(crate) const WRONG_PASSWORD: &str = "correct horse ";
+
+    /// The (made-up) account list inside the file.
+    pub(crate) const VECTOR_JSON: &str = r#"[{"Username":"demo_user","UserID":42,"SecurityToken":"_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE","Password":"hunter2","Alias":"a","Description":"d","Group":"G"}]"#;
+
+    /// Written the way `Cryptography.Encrypt` does it, by calling the
+    /// `libsodium.dll` that ships with the legacy app (libsodium 1.0.11):
+    /// `pw = crypto_hash("correct horse")`,
+    /// `key = crypto_pwhash(32, pw, salt, 6, 134217728, 1)`,
+    /// `crypto_secretbox_easy(VECTOR_JSON, nonce, key)`, with the salt fixed
+    /// to `a0..af` and the nonce to `10..27` (the app draws both at random).
+    const VECTOR_HEX: &str = "\
+        526f626c6f78204163636f756e74204d616e6167657220637265617465642062792069633377306c663232204020676974687562\
+        2e636f6d202e2e2e2e2e2e2ea0a1a2a3a4a5a6a7a8a9aaabacadaeaf101112131415161718191a1b1c1d1e1f2021222324252627\
+        eed152882f108c7e58185a7d49467b71e336bf09e43481c8805ca4f689043cf6b8444701472d1f270d36bbdb0346eda752be0706\
+        fe01046602328d60eb3fb00435656b32b6ddf67bd72e08c903e3386ee98b6ef9d320ab839202021ca9e462b64e76300a005e82fb\
+        63636a9b8b193c35f877507458c6167c238f42792fd66611bf17b949367111e05aa38d65446098eb85ffac90c9068c2ddf7424de\
+        373e7cb263e8ad3790fde50a5a6886dce8f803b50dd91d39e42c3d9070575da208ffed28cbc01df556fc0c6205e7d6294a5edf88\
+        8813c9a57301fd7e0cfea3af147088ceeacd24e314645b1076a6e4f62794add74db16ff83cbc93e4ad69d3244d156d1384c767f2\
+        9d9d0d254dbc780613ac243cfda4016a9d308dea97c9e811aafb2b37e53bf959b55b142615f3ed8456afe0f39ebd99b820a3496c";
+
+    pub(crate) fn libsodium_file() -> Vec<u8> {
+        let digit = |c: u8| (c as char).to_digit(16).unwrap() as u8;
+        VECTOR_HEX.as_bytes().chunks(2).map(|pair| digit(pair[0]) << 4 | digit(pair[1])).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_vectors::{libsodium_file, VECTOR_JSON, VECTOR_PASSWORD, WRONG_PASSWORD};
     use super::*;
     use crate::model::{SignInState, ROGUE_LINEAGE_PLACE_ID};
 
@@ -1506,9 +1838,11 @@ mod tests {
         let files = with(full_files(), ACCOUNT_FILE, password_blob());
         let scan = scan_of(&files, Some(&FakeDecryptor(Err("must not matter".into()))));
         assert_eq!(scan.account_file, AccountFileKind::PasswordProtected);
+        assert!(scan.needs_password && !scan.wrong_password);
         assert!(scan.accounts.is_empty());
         let notice = scan.notices.iter().find(|n| n.contains(ACCOUNT_FILE)).unwrap();
         assert!(notice.contains("password-protected"));
+        assert!(notice.contains("enter the password"));
         assert!(notice.contains("other files still import"));
         assert!(notice.contains("remove the password"));
 
@@ -2239,5 +2573,154 @@ mod tests {
         assert_eq!(odd.account_file, AccountFileKind::Unrecognised);
         assert!(odd.notices.iter().any(|n| n.contains(RECENT_FILE)));
         assert_eq!(odd.destinations.len(), 2);
+    }
+
+    // --- password-protected files -------------------------------------------
+
+    #[test]
+    fn sha512_matches_known_answers() {
+        let hex = |data: &[u8]| sha512(data).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        assert_eq!(hex(b""), "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e");
+        assert_eq!(hex(b"abc"), "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f");
+        // Either side of the point where the padding needs a second block, and more than one block.
+        assert_eq!(hex(&[b'a'; 111]), "fa9121c7b32b9e01733d034cfc78cbf67f926c7ed83e82200ef86818196921760b4beff48404df811b953828274461673c68d04e297b0eb7b2b4d60fc6b566a2");
+        assert_eq!(hex(&[b'a'; 112]), "c01d080efd492776a1c43bd23dd99d0a2e626d481e16782e75d54c2503b5dc32bd05f0f1ba33e568b88fd2d970929b719ecbb152f58f130a407c8830604b70ca");
+        assert_eq!(hex(&[b'a'; 200]), "4b11459c33f52a22ee8236782714c150a3b2c60994e9acee17fe68947a3e6789f31e7668394592da7bef827cddca88c4e6f86e4df7ed1ae6cba71f3e98faee9f");
+        // What libsodium's crypto_hash returned for the vector's password.
+        assert_eq!(hex(VECTOR_PASSWORD.as_bytes()), "56b698defedb5a435b634afe3320bbaf3fdcd920b6c503a446fc7b7a776b298d479d1ba6a8b617808eb0bf579ce9a95d668347bcab7149085ac93cb27995197b");
+    }
+
+    #[test]
+    fn opens_a_file_written_by_libsodium() {
+        let file = libsodium_file();
+        assert_eq!(file.len(), 64 + 16 + 24 + 16 + VECTOR_JSON.len());
+        assert_eq!(detect_account_file(&file), AccountFileKind::PasswordProtected);
+
+        let plain = decrypt_password_file(&file, VECTOR_PASSWORD).expect("the right password opens it");
+        assert_eq!(String::from_utf8(plain).unwrap(), VECTOR_JSON);
+        assert_eq!(decrypt_password_file(&file, WRONG_PASSWORD), Err(PasswordFileError::WrongPassword));
+
+        // The right password does not open a file that was altered, in the box or in the nonce.
+        for at in [64 + 16, 64 + 16 + 24, file.len() - 1] {
+            let mut altered = file.clone();
+            altered[at] ^= 0x01;
+            assert_eq!(decrypt_password_file(&altered, VECTOR_PASSWORD), Err(PasswordFileError::WrongPassword), "{at}");
+        }
+    }
+
+    #[test]
+    fn rejects_what_cannot_be_a_password_file() {
+        // None of these gets as far as key derivation.
+        let not_one: [&[u8]; 4] = [b"", b"[]", &DPAPI_MAGIC, &PASSWORD_HEADER[..63]];
+        for bytes in not_one {
+            assert_eq!(decrypt_password_file(bytes, "pw"), Err(PasswordFileError::NotPasswordFile));
+        }
+        let file = libsodium_file();
+        for len in [64, 64 + 16, 64 + 16 + 24, 64 + 16 + 24 + 15] {
+            assert_eq!(decrypt_password_file(&file[..len], "pw"), Err(PasswordFileError::Malformed), "{len}");
+        }
+    }
+
+    #[test]
+    fn account_file_names_and_backups() {
+        assert_eq!(match_account_file_name("AccountData.json"), Some(false));
+        assert_eq!(match_account_file_name("accountdata.JSON"), Some(false));
+        for name in ["AccountData.json.backup", "ACCOUNTDATA.JSON.BAK", "AccountData.json.old"] {
+            assert_eq!(match_account_file_name(name), Some(true), "{name}");
+        }
+        let others = [
+            "",
+            "AccountData",
+            "AccountData.jsonx",
+            "AccountData.json.tmp",
+            "xAccountData.json",
+            CONTROL_FILE,
+            "AccountData.jso\u{144}",
+        ];
+        for name in others {
+            assert_eq!(match_account_file_name(name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn scan_path_takes_a_folder_or_an_account_file() {
+        let dir = TempDir::new("path");
+        for (name, bytes) in full_files() {
+            std::fs::write(dir.0.join(name), bytes).unwrap();
+        }
+        let by_folder = scan_path(&dir.0, None, None);
+        assert_eq!(by_folder, scan(&dir.0, None));
+        assert_eq!(by_folder.accounts.len(), 3);
+        let by_file = scan_path(&dir.0.join(ACCOUNT_FILE), None, Some("ignored for a plaintext file"));
+        assert_eq!(by_file, by_folder);
+        assert!(!by_file.needs_password && !by_file.wrong_password);
+
+        // A backup is read by its own path; the other files come from its folder.
+        let backup = dir.0.join("AccountData.json.backup");
+        std::fs::write(&backup, r#"[{"Username":"FromBackup","UserID":7}]"#).unwrap();
+        let from_backup = scan_path(&backup, None, None);
+        assert_eq!(from_backup.folder, dir.0);
+        assert_eq!(from_backup.account_file, AccountFileKind::Plaintext);
+        assert_eq!(from_backup.accounts.iter().map(|a| a.username.as_str()).collect::<Vec<_>>(), vec!["FromBackup"]);
+        assert_eq!((&from_backup.games, &from_backup.destinations), (&by_folder.games, &by_folder.destinations));
+        let mut store = Store::default();
+        assert_eq!(import(&mut store, &from_backup).accounts_added, 1);
+
+        // So is a copy under any other name.
+        let renamed = dir.0.join("my accounts.txt");
+        std::fs::write(&renamed, accounts_json()).unwrap();
+        assert_eq!(scan_path(&renamed, None, None).accounts, by_folder.accounts);
+
+        // A backup that is not there is reported under its own name.
+        let missing = scan_path(&dir.0.join("AccountData.json.bak"), None, None);
+        assert_eq!(missing.account_file, AccountFileKind::Missing);
+        assert!(missing.notices.iter().any(|n| n.starts_with("AccountData.json.bak was not found")));
+        assert_eq!(missing.games, by_folder.games);
+
+        let nowhere = Path::new("Z:/definitely/not/a/real/folder-RAM");
+        assert_eq!(scan_path(nowhere, None, None), scan(nowhere, None));
+    }
+
+    #[test]
+    fn scan_path_opens_a_password_protected_file() {
+        let dir = TempDir::new("locked");
+        let file = dir.0.join("AccountData.json.backup");
+        std::fs::write(&file, libsodium_file()).unwrap();
+        std::fs::write(dir.0.join(RECENT_FILE), RECENT).unwrap();
+
+        for password in [None, Some("")] {
+            let locked = scan_path(&file, None, password);
+            assert_eq!(locked.account_file, AccountFileKind::PasswordProtected);
+            assert!(locked.needs_password && !locked.wrong_password);
+            assert!(locked.accounts.is_empty());
+            assert_eq!(locked.games.len(), 2, "the rest still imports");
+            let notice = locked.notices.iter().find(|n| n.contains("password")).unwrap();
+            assert!(notice.starts_with("AccountData.json.backup is password-protected"), "{notice}");
+            assert!(notice.contains("enter the password"), "{notice}");
+        }
+
+        let wrong = scan_path(&file, None, Some(WRONG_PASSWORD));
+        assert_eq!(wrong.account_file, AccountFileKind::PasswordProtected);
+        assert!(wrong.wrong_password && !wrong.needs_password);
+        assert!(wrong.accounts.is_empty());
+        assert_eq!(wrong.games.len(), 2);
+        assert!(wrong.notices.iter().any(|n| n.contains("that password did not open it")));
+
+        let open = scan_path(&file, None, Some(VECTOR_PASSWORD));
+        assert_eq!(open.account_file, AccountFileKind::PasswordProtected);
+        assert!(!open.needs_password && !open.wrong_password);
+        assert_eq!(open.accounts.len(), 1);
+        let a = &open.accounts[0];
+        assert_eq!((a.username.as_str(), a.user_id), ("demo_user", Some(42)));
+        assert_eq!((a.alias.as_str(), a.description.as_str(), a.group.as_str()), ("a", "d", "G"));
+        assert!(!open.notices.iter().any(|n| n.contains("password")), "{:?}", open.notices);
+        let shown = format!("{open:?}");
+        assert!(!shown.contains("FAKE") && !shown.contains("hunter2"), "{shown}");
+
+        let mut store = Store::default();
+        let record = import(&mut store, &open);
+        assert_eq!(record.accounts_added, 1);
+        assert_eq!((store.accounts[0].username.as_str(), store.accounts[0].roblox_user_id), ("demo_user", Some(42)));
+        assert!(store.games.iter().any(|g| g.name == "Jailbreak"));
     }
 }

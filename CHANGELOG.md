@@ -4,6 +4,26 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.4.0 (2026-11-21)
+
+### New
+- **Bulk add from `username:password`.** Paste lines into Add → Add many at once. RAM opens Roblox's sign-in page in your browser for one account at a time, fills it in and submits it; you solve any check, RAM saves the session and moves to the next. Skip and Stop buttons; closing the browser window stops the queue. Cookie lines in the same paste are still added straight away.
+- **Saved passwords (optional).** Passwords from the queue, and passwords stored in an imported AccountData.json, are kept encrypted in the vault. Right-click → Copy → Password or username:password, behind Windows Hello or the master password. Each account shows how it was signed in: *cookie only*, *browser sign-in*, or *login + password*.
+- **Import finds your file.** The Import dialog searches Desktop, Downloads, Documents, your user folder, OneDrive and other drives for `AccountData.json` and its backups (`.backup`, `.bak`, `.old`), and you can pick a file directly.
+- **Password-protected AccountData.json.** Enter the password you set in Roblox Account Manager and RAM unlocks the file for the import. The file is not changed and the password is not stored.
+- **Running clients** (Settings): minimize on launch, start clients tiny, mute on launch, a CPU limit and efficiency mode for clients in the background, memory trim on a schedule, and a bandwidth limit (a Windows network policy; asks for administrator approval). Never applied to Main or Full quality accounts.
+- **Volume 0** for alt clients (Roblox's own volume, restored afterwards).
+- **Minimize all / Restore all** in Clients.
+- **Browser choice** in Settings → Launching: follow the Windows default, or pin Brave, Chrome, Edge or Vivaldi.
+- New app icon.
+
+### Fixed
+- A changed default browser was ignored on newer Windows 11 builds, which record the choice in a new registry key. A profile created by another browser is reset when the browser changes.
+- Accounts stayed on "Client starting…" after the client was running or closed. The line now clears when the client is seen, when it exits, and after two minutes at most.
+
+### Changed
+- Performance starts at **Roblox defaults (off)**; the three presets are a selector that shows which one is active.
+
 ## 0.3.2 (2026-11-21)
 
 ### Fixed

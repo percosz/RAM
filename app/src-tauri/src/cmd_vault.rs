@@ -127,6 +127,12 @@ pub fn cookie_set(app: AppHandle, state: State<'_, Shared>, id: AccountId, cooki
         let mut s = lock(&state)?;
         let stored = who.rotated_cookie.as_deref().unwrap_or(&value);
         s.vault.set_secret(id, stored, &crate::svc::WinEntropy, now()).map_err(|e| e.to_string())?;
+        if let Some(a) = s.store.account_mut(id) {
+            if a.method == ram_core::model::SignInMethod::Unknown {
+                a.method = ram_core::model::SignInMethod::Cookie;
+            }
+        }
+        s.save();
         s.log.info(&format!("account {id}: cookie pasted and confirmed"));
     }
     crate::cmd_launch::start_check(app, id);
@@ -144,7 +150,8 @@ pub fn cookie_remove(state: State<'_, Shared>, id: AccountId) -> Result<(), Stri
 /// Runs off the UI thread (`async`): the Hello prompt is modal and needs the
 /// main window's message loop, so blocking the UI thread on it froze the app.
 #[tauri::command(async)]
-pub fn cookie_reveal(app: AppHandle, state: State<'_, Shared>, id: AccountId, password: Option<String>) -> Result<String, String> {
+pub fn cookie_reveal(app: AppHandle, state: State<'_, Shared>, id: AccountId, password: Option<String>, what: Option<String>) -> Result<String, String> {
+    let what = what.unwrap_or_else(|| "cookie".to_string());
     // Gate first, holding no lock while the Hello prompt is up.
     let (require_hello, master) = {
         let s = lock(&state)?;
@@ -156,7 +163,8 @@ pub fn cookie_reveal(app: AppHandle, state: State<'_, Shared>, id: AccountId, pa
     let mut gated = false;
     if require_hello && ram_win::hello::is_available() {
         let hwnd = app.get_webview_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize).unwrap_or(0);
-        match svc::hello_confirm(hwnd, "Confirm to reveal a Roblox session cookie") {
+        let prompt = if what == "cookie" { "Confirm to copy a Roblox session cookie" } else { "Confirm to copy a Roblox password" };
+        match svc::hello_confirm(hwnd, prompt) {
             Ok(true) => gated = true,
             Ok(false) => return Err("Cancelled.".into()),
             Err(e) => {
@@ -178,6 +186,14 @@ pub fn cookie_reveal(app: AppHandle, state: State<'_, Shared>, id: AccountId, pa
         // DPAPI vault without Hello: Windows sign-in already gated it.
     }
     s.vault.touch(now());
+    if what == "password" || what == "userpass" {
+        let username = s.store.account(id).map(|a| a.username.clone()).unwrap_or_default();
+        return match s.vault.password(id) {
+            Ok(Some(p)) => Ok(if what == "userpass" { format!("{username}:{}", p.as_str()) } else { p.to_string() }),
+            Ok(None) => Err("No password is stored for this account (it was added by cookie).".into()),
+            Err(e) => Err(e.to_string()),
+        };
+    }
     match s.vault.secret(id) {
         Ok(Some(c)) => Ok(c.to_string()),
         Ok(None) => Err("No cookie is stored for this account.".into()),

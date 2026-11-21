@@ -50,7 +50,7 @@ function usePlaceInfo(placeId: string): { state: "idle" | "loading" | "ok" | "un
 
 type Dialog =
   | null | { kind: "add" } | { kind: "import" }
-  | { kind: "copyCookie"; id: number } | { kind: "remove"; ids: number[] } | { kind: "removeCookie"; id: number }
+  | { kind: "copyCookie"; id: number; what: "cookie" | "password" | "userpass" } | { kind: "remove"; ids: number[] } | { kind: "removeCookie"; id: number }
   | { kind: "newGroup"; ids: number[] };
 
 interface DragState { ids: number[]; startX: number; startY: number; active: boolean; over: number | null; after: boolean; }
@@ -165,15 +165,15 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
   const copy = async (text: string, what: string) => {
     try { await writeText(text); toast(`${what} copied.`, "good"); } catch (e) { toast(String(e), "bad"); }
   };
-  const copyCookie = async (id: number) => {
+  const copyCookie = async (id: number, what: "cookie" | "password" | "userpass" = "cookie") => {
     if (needCookieVault()) return;
     try {
-      const c = await api.cookieReveal(id);
+      const c = await api.cookieReveal(id, undefined, what);
       await writeText(c);
-      toast("Cookie copied. Anyone with it can sign in as this account; clear your clipboard when done.", "warn");
+      toast(what === "cookie" ? "Cookie copied. Anyone with it can sign in as this account; clear your clipboard when done." : what === "password" ? "Password copied. Clear your clipboard when done." : "username:password copied. Clear your clipboard when done.", "warn");
     } catch (e) {
       const t = String(e);
-      if (t.includes("PASSWORD_REQUIRED")) setDialog({ kind: "copyCookie", id });
+      if (t.includes("PASSWORD_REQUIRED")) setDialog({ kind: "copyCookie", id, what });
       else if (!t.includes("Cancelled")) toast(t, "bad");
     }
   };
@@ -251,6 +251,8 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
       { label: "Profile link", disabled: !a.roblox_user_id, onClick: () => copy(`https://www.roblox.com/users/${a.roblox_user_id}/profile`, "Profile link") },
       { sep: true },
       { label: "Cookie", icon: <KeyRound />, disabled: !a.has_cookie, onClick: () => copyCookie(a.id) },
+      { label: "Password", icon: <KeyRound />, disabled: !a.has_password, hint: a.has_password ? undefined : "added by cookie", onClick: () => copyCookie(a.id, "password") },
+      { label: "username:password", icon: <KeyRound />, disabled: !a.has_password, onClick: () => copyCookie(a.id, "userpass") },
     ] : [
       { label: "Usernames", onClick: () => copy(list.map((x) => x.username).join("\n"), `${n} usernames`) },
       { label: "User IDs", onClick: () => copy(list.map((x) => x.roblox_user_id ?? "").filter(Boolean).join("\n"), "User IDs") },
@@ -388,7 +390,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.ids)} onClose={() => setMenu(null)} />}
       {dialog?.kind === "add" && <AddAccountDialog onClose={() => setDialog(null)} onImport={() => setDialog({ kind: "import" })} />}
       {dialog?.kind === "import" && <ImportDialog onClose={() => setDialog(null)} />}
-      {dialog?.kind === "copyCookie" && <RevealCookieDialog id={dialog.id} name={nameOf(accounts.find((a) => a.id === dialog.id)?.username ?? "")} needPassword onClose={() => setDialog(null)} />}
+      {dialog?.kind === "copyCookie" && <RevealCookieDialog id={dialog.id} what={dialog.what} name={nameOf(accounts.find((a) => a.id === dialog.id)?.username ?? "")} needPassword onClose={() => setDialog(null)} />}
       {dialog?.kind === "newGroup" && <NewGroupDialog onClose={() => setDialog(null)} onCreate={(g) => setGroupOf(dialog.ids, g)} />}
       {dialog?.kind === "remove" && <ConfirmDialog danger title="Remove account" text={`Remove ${dialog.ids.length === 1 ? nameOf(accounts.find((a) => a.id === dialog.ids[0])?.username ?? "") : dialog.ids.length + " accounts"} from RAM? Any stored cookie is deleted from this PC; the Roblox account itself is not affected.`} onYes={() => remove(dialog.ids)} onClose={() => setDialog(null)} />}
       {dialog?.kind === "removeCookie" && <ConfirmDialog danger title="Remove cookie" text="Delete the stored cookie for this account? The account stays in the list." onYes={async () => { await api.cookieRemove(dialog.id); await refresh(); }} onClose={() => setDialog(null)} />}
@@ -432,7 +434,10 @@ function Details({ a, onOpenBrowser, onCheck, onRemove }: { a: Account; onOpenBr
         {a.robux != null && <span className="badge accent">R$ {a.robux.toLocaleString()}</span>}
         {a.premium && <span className="badge warn">Premium</span>}
         {a.client === "Running" && <span className="badge good">In game</span>}
-        {a.has_cookie ? <span className="badge muted"><KeyRound style={{ width: 11, height: 11 }} />cookie</span> : <span className="badge muted">no cookie</span>}
+        {!a.has_cookie ? <span className="badge muted">no cookie</span>
+          : a.has_password ? <span className="badge muted" title="Signed in with username and password. The password is saved in the vault, so both it and the cookie can be copied (right-click → Copy)."><KeyRound style={{ width: 11, height: 11 }} />login + password</span>
+          : a.method === "Login" ? <span className="badge muted" title="Signed in through the browser. Only the session cookie is stored; no password was saved."><KeyRound style={{ width: 11, height: 11 }} />browser sign-in</span>
+          : <span className="badge muted" title="Added from a cookie. Only the session cookie is stored; there is no password to copy."><KeyRound style={{ width: 11, height: 11 }} />cookie only</span>}
       </div>
       {a.sign_in.detail && a.sign_in.state !== "Verified" && <div className="hint">{a.sign_in.detail}</div>}
 

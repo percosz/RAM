@@ -35,6 +35,10 @@ export interface Account {
   avatar_url: string | null;
   fps_cap: number | null;
   full_quality: boolean;
+  /** A password is stored (the account was added by username and password). */
+  has_password: boolean;
+  /** How the session got into the vault. */
+  method: "Unknown" | "Cookie" | "Login";
   client: string;
   client_pid: number | null;
 }
@@ -57,6 +61,8 @@ export interface Settings {
   check_updates: boolean;
   seen_version: string;
   hide_usernames: boolean;
+  /** "" follows the Windows default browser; otherwise a browser's full path. */
+  browser: string;
   window: unknown;
   last_import_dir: string;
 }
@@ -84,13 +90,31 @@ export interface GraphicsSettings {
   lighter_rendering: boolean;
   render: RenderFlags;
   custom_flags: Record<string, string>;
+  mute_volume: boolean;
 }
+
+export interface LimitSettings {
+  minimize_on_launch: boolean;
+  tiny_on_launch: boolean;
+  tiny_width: number;
+  tiny_height: number;
+  mute_on_launch: boolean;
+  cpu_limit_percent: number;
+  efficiency_mode: boolean;
+  trim_every_min: number;
+  bandwidth_kbps: number;
+}
+
+export interface BrowserChoice { name: string; path: string; is_default: boolean; }
+export interface FoundFile { path: string; kind: string; modified: number | null; size: number; is_backup: boolean; }
+export interface QueueEvent { index: number; total: number; username: string; state: "opening" | "filling" | "waiting" | "done" | "failed" | "skipped" | "finished"; message: string; done: number; failed: number; }
 
 export interface Snapshot {
   version: string;
   accounts: Account[];
   settings: Settings;
   graphics: GraphicsSettings;
+  limits: LimitSettings;
   games: Game[];
   vault: VaultStatus;
   main_account: number | null;
@@ -106,7 +130,7 @@ export interface Snapshot {
 }
 
 export interface Adopted { account: Account; added: boolean; }
-export interface ManyResult { added: number; refreshed: number; repeated: number; failed: number; problems: string[]; }
+export interface ManyResult { added: number; refreshed: number; repeated: number; failed: number; queued: number; problems: string[]; }
 export type SignInPoll = { state: "waiting" } | { state: "closed" } | ({ state: "done" } & Adopted);
 
 export interface UpdateInfo { version: string; notes: string; date: string; }
@@ -145,14 +169,22 @@ export interface CrashRecord {
 export interface LogLine { level: "debug" | "info" | "warn" | "error"; text: string; }
 
 export interface PlanItem { index: number; kind: string; label: string; detail: string; action: string; selectable: boolean; selected: boolean; }
-export interface PlanView { folder: string; items: PlanItem[]; notices: string[]; add: number; update: number; unchanged: number; skip: number; cookies_available: number; }
+export interface PlanView { folder: string; items: PlanItem[]; notices: string[]; add: number; update: number; unchanged: number; skip: number; cookies_available: number; passwords_available: number; needs_password: boolean; wrong_password: boolean; }
 
 export const api = {
   startHint: () => invoke<[string, boolean, string]>("start_hint"),
   snapshot: () => invoke<Snapshot>("snapshot"),
   addAccount: (username: string, alias: string) => invoke<Account>("add_account", { username, alias }),
   addByCookie: (cookie: string, alias: string) => invoke<Adopted>("add_by_cookie", { cookie, alias }),
-  addMany: (text: string) => invoke<ManyResult>("add_many", { text }),
+  addMany: (text: string, savePasswords: boolean) => invoke<ManyResult>("add_many", { text, savePasswords }),
+  signinQueueSkip: () => invoke<void>("signin_queue_skip"),
+  signinQueueStop: () => invoke<void>("signin_queue_stop"),
+  onSigninQueue: (cb: (e: QueueEvent) => void): Promise<UnlistenFn> => listen<QueueEvent>("signin-queue", (e) => cb(e.payload)),
+  listBrowsers: () => invoke<BrowserChoice[]>("list_browsers"),
+  setLimits: (limits: LimitSettings) => invoke<LimitSettings>("set_limits", { limits }),
+  applyBandwidth: (kbps: number) => invoke<LimitSettings>("apply_bandwidth", { kbps }),
+  clientsMinimizeAll: (minimize: boolean) => invoke<number>("clients_minimize_all", { minimize }),
+  importFind: () => invoke<FoundFile[]>("import_find"),
   signinStart: () => invoke<string>("signin_start"),
   signinPoll: () => invoke<SignInPoll>("signin_poll"),
   signinCancel: () => invoke<void>("signin_cancel"),
@@ -178,7 +210,8 @@ export const api = {
   /** Stores a pasted cookie after Roblox confirms it belongs to this account; returns the username. */
   cookieSet: (id: number, cookie: string) => invoke<string>("cookie_set", { id, cookie }),
   cookieRemove: (id: number) => invoke<void>("cookie_remove", { id }),
-  cookieReveal: (id: number, password?: string) => invoke<string>("cookie_reveal", { id, password: password ?? null }),
+  /** Reveals a cookie (default), a stored password, or "username:password", behind Windows Hello or the master password. */
+  cookieReveal: (id: number, password?: string, what: "cookie" | "password" | "userpass" = "cookie") => invoke<string>("cookie_reveal", { id, password: password ?? null, what }),
 
   checkAccounts: (ids: number[]) => invoke<void>("check_accounts", { ids }),
   refreshAvatars: (force = false) => invoke<void>("refresh_avatars", { force }),
@@ -190,8 +223,8 @@ export const api = {
   browserCapture: (id: number) => invoke<void>("browser_capture", { id }),
   browserClear: (id: number) => invoke<void>("browser_clear", { id }),
 
-  importScan: (folder: string) => invoke<PlanView>("import_scan", { folder }),
-  importApply: (folder: string, selected: number[], withCookies: boolean) => invoke<string>("import_apply", { folder, selected, withCookies }),
+  importScan: (folder: string, password?: string) => invoke<PlanView>("import_scan", { folder, password: password ?? null }),
+  importApply: (folder: string, selected: number[], withCookies: boolean, password?: string) => invoke<string>("import_apply", { folder, selected, withCookies, password: password ?? null }),
   exportAccounts: (folder: string, withCookies: boolean) => invoke<string>("export_accounts", { folder, withCookies }),
   clientsSnapshot: () => invoke<ClientView[]>("clients_snapshot"),
   closeClient: (pid: number) => invoke<void>("close_client", { pid }),

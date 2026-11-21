@@ -6,6 +6,7 @@
 #![cfg(windows)]
 
 pub mod browser;
+pub mod client_ctl;
 pub mod crypto;
 pub mod dpapi;
 pub mod events;

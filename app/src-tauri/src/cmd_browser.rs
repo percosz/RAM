@@ -32,6 +32,81 @@ pub fn pick_browser() -> Option<Browser> {
     }
 }
 
+/// The browser to use given the Settings choice: a full path picks that
+/// browser when it still exists and is Chromium-based; empty (or a stale
+/// path) follows the Windows default, read fresh every time.
+pub fn pick_browser_for(choice: &str) -> Option<Browser> {
+    let choice = choice.trim();
+    if !choice.is_empty() {
+        let path = PathBuf::from(choice);
+        if path.is_file() {
+            if let Some(b) = installed_browsers().into_iter().find(|b| b.exe.to_string_lossy().eq_ignore_ascii_case(choice)) {
+                return Some(b);
+            }
+        }
+    }
+    pick_browser()
+}
+
+/// Chromium-based browsers found on this PC, the Windows default first.
+pub fn installed_browsers() -> Vec<Browser> {
+    let mut out: Vec<Browser> = Vec::new();
+    if let Some(b) = sysbrowser::default_browser() {
+        if b.chromium {
+            out.push(b);
+        }
+    }
+    for b in sysbrowser::known_chromium_browsers() {
+        if !out.iter().any(|x| x.exe.to_string_lossy().eq_ignore_ascii_case(&b.exe.to_string_lossy())) {
+            out.push(b);
+        }
+    }
+    out
+}
+
+/// A profile folder belongs to the browser that created it. When the
+/// browser changes (new default, or a new choice in Settings) the old
+/// profile is wiped so the new browser starts from a clean one instead of
+/// tripping over another browser's files.
+fn claim_profile(dir: &std::path::Path, browser: &Browser) {
+    let marker = dir.join(".ram-browser");
+    let want = browser.exe.to_string_lossy().to_ascii_lowercase();
+    match std::fs::read_to_string(&marker) {
+        Ok(have) if have.trim() == want => {}
+        Ok(_) => {
+            if !sysbrowser::is_running(dir) {
+                let _ = sysbrowser::wipe_profile(dir);
+            }
+            let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::write(&marker, &want);
+        }
+        Err(_) => {
+            let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::write(&marker, &want);
+        }
+    }
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct BrowserChoice {
+    pub name: String,
+    pub path: String,
+    pub is_default: bool,
+}
+
+/// Browsers the user can pick in Settings.
+#[tauri::command]
+pub fn list_browsers() -> Vec<BrowserChoice> {
+    let default = sysbrowser::default_browser().map(|b| b.exe.to_string_lossy().to_ascii_lowercase());
+    installed_browsers()
+        .into_iter()
+        .map(|b| {
+            let path = b.exe.to_string_lossy().to_string();
+            BrowserChoice { is_default: default.as_deref() == Some(path.to_ascii_lowercase().as_str()), name: b.name, path }
+        })
+        .collect()
+}
+
 pub fn profile_dir(data_dir: &std::path::Path, id: AccountId) -> PathBuf {
     data_dir.join("browser-profiles").join(id.to_string())
 }
@@ -54,17 +129,18 @@ pub fn sweep_profiles(data_dir: &std::path::Path) {
 /// UI when there is something to say.
 #[tauri::command]
 pub fn open_browser(app: AppHandle, state: State<'_, Shared>, id: AccountId) -> Result<String, String> {
-    let browser = pick_browser().ok_or_else(|| {
-        let d = sysbrowser::default_browser().map(|b| b.name).unwrap_or_else(|| "your default browser".into());
-        format!("RAM can only drive Chromium-based browsers (Brave, Chrome, Edge, Vivaldi). {d} is the default and none of those is installed.")
-    })?;
-    let (cookie, dir, name) = {
+    let (cookie, dir, name, choice) = {
         let mut s = state.lock().map_err(|_| "application state is unavailable".to_string())?;
         let cookie = s.cookie(id);
         let dir = profile_dir(&s.data_dir, id);
         let name = s.account_name(id);
-        (cookie, dir, name)
+        (cookie, dir, name, s.store.settings.browser.clone())
     };
+    let browser = pick_browser_for(&choice).ok_or_else(|| {
+        let d = sysbrowser::default_browser().map(|b| b.name).unwrap_or_else(|| "your default browser".into());
+        format!("RAM can only drive Chromium-based browsers (Brave, Chrome, Edge, Vivaldi). {d} is the default and none of those is installed.")
+    })?;
+    claim_profile(&dir, &browser);
     let was_running = sysbrowser::is_running(&dir);
     let url = if cookie.is_some() { ROBLOX_HOME } else { ROBLOX_LOGIN };
     let session = sysbrowser::open_signed_in(&browser, &dir, cookie.as_deref(), url, &name)?;

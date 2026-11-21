@@ -101,17 +101,22 @@ pub struct GraphicsSettings {
     pub render: RenderFlags,
     /// The user's own FastFlags, appended last so they win.
     pub custom_flags: BTreeMap<String, String>,
+    /// Set Roblox's own volume to 0 for alt clients (`MasterVolume` in the
+    /// XML), restored like the other values.
+    pub mute_volume: bool,
 }
 
 impl Default for GraphicsSettings {
+    /// Roblox's defaults: nothing is changed until the user picks something.
     fn default() -> Self {
         Self {
             enabled: false,
             fps_cap: 0,
-            low_graphics: true,
-            lighter_rendering: true,
+            low_graphics: false,
+            lighter_rendering: false,
             render: RenderFlags::default(),
             custom_flags: BTreeMap::new(),
+            mute_volume: false,
         }
     }
 }
@@ -136,6 +141,9 @@ pub struct Effective {
     /// `Some` when lighter rendering is on for this launch.
     pub lighter: Option<RenderFlags>,
     pub custom: BTreeMap<String, String>,
+    /// Roblox volume 0 for this launch.
+    #[serde(default)]
+    pub mute: bool,
 }
 
 /// Clamps an FPS cap to 0 (leave alone) or 5..=360.
@@ -165,6 +173,7 @@ pub fn effective(g: &GraphicsSettings, acct: &AccountGraphics, is_main: bool) ->
         low_graphics,
         lighter,
         custom: g.custom_flags.clone(),
+        mute: g.mute_volume && !acct.full_quality,
     })
 }
 
@@ -446,11 +455,48 @@ pub struct XmlValues {
     pub framerate_cap: Option<i64>,
     pub quality_level: Option<i64>,
     pub saved_quality: Option<i64>,
+    /// `MasterVolume` in thousandths (0 = silent, 1000 = full).
+    pub master_volume: Option<i64>,
 }
 
 const XML_FRAMERATE: (&str, &str) = ("int", "FramerateCap");
 const XML_QUALITY: (&str, &str) = ("int", "GraphicsQualityLevel");
 const XML_SAVED: (&str, &str) = ("token", "SavedQualityLevel");
+const XML_VOLUME: (&str, &str) = ("float", "MasterVolume");
+
+/// Reads a float element as thousandths.
+fn xml_get_milli(text: &str, (elem, name): (&str, &str)) -> Option<i64> {
+    let r = xml_value_range(text, elem, name)?;
+    let v: f64 = text[r].trim().parse().ok()?;
+    v.is_finite().then(|| (v * 1000.0).round() as i64)
+}
+
+/// Thousandths as the shortest decimal Roblox accepts ("0", "1", "0.5").
+fn milli_text(milli: i64) -> String {
+    if milli % 1000 == 0 {
+        (milli / 1000).to_string()
+    } else {
+        let s = format!("{:.3}", milli as f64 / 1000.0);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+fn xml_set_text(text: &mut String, (elem, name): (&str, &str), value: &str) {
+    if let Some(r) = xml_value_range(text, elem, name) {
+        text.replace_range(r, value);
+        return;
+    }
+    let Some(close) = text.find("</Properties>") else {
+        return;
+    };
+    let element = format!("{}{value}</{elem}>", xml_open_tag(elem, name));
+    let line_start = text[..close].rfind('\n').map_or(0, |i| i + 1);
+    if text[line_start..close].trim().is_empty() {
+        text.insert_str(line_start, &format!("\t\t\t{element}\n"));
+    } else {
+        text.insert_str(close, &format!("\n\t\t\t{element}\n\t\t"));
+    }
+}
 
 fn xml_open_tag(elem: &str, name: &str) -> String {
     format!("<{elem} name=\"{name}\">")
@@ -516,6 +562,7 @@ pub fn xml_get(text: &str) -> XmlValues {
         framerate_cap: xml_get_one(text, XML_FRAMERATE),
         quality_level: xml_get_one(text, XML_QUALITY),
         saved_quality: xml_get_one(text, XML_SAVED),
+        master_volume: xml_get_milli(text, XML_VOLUME),
     }
 }
 
@@ -542,6 +589,9 @@ pub fn xml_set(text: &str, v: &XmlValues) -> String {
     if let Some(n) = v.saved_quality {
         xml_set_one(&mut out, XML_SAVED, n);
     }
+    if let Some(n) = v.master_volume {
+        xml_set_text(&mut out, XML_VOLUME, &milli_text(n));
+    }
     out
 }
 
@@ -555,6 +605,7 @@ pub fn xml_for_launch(e: &Effective, current: &XmlValues) -> XmlValues {
         },
         quality_level: if e.low_graphics { Some(1) } else { current.quality_level },
         saved_quality: if e.low_graphics { Some(1) } else { current.saved_quality },
+        master_volume: if e.mute { Some(0) } else { current.master_volume },
     }
 }
 
@@ -660,6 +711,14 @@ pub fn settle(path: &Path, undo: &XmlUndo) -> Result<bool, String> {
             None => xml_remove_one(&mut out, key),
         }
     }
+    if let Some(ours) = undo.ours.master_volume {
+        if current.master_volume == Some(ours) {
+            match undo.user.master_volume {
+                Some(v) => xml_set_text(&mut out, XML_VOLUME, &milli_text(v)),
+                None => xml_remove_one(&mut out, XML_VOLUME),
+            }
+        }
+    }
     if out == text {
         return Ok(false);
     }
@@ -748,6 +807,8 @@ mod tests {
     fn enabled() -> GraphicsSettings {
         GraphicsSettings {
             enabled: true,
+            low_graphics: true,
+            lighter_rendering: true,
             ..GraphicsSettings::default()
         }
     }
@@ -758,6 +819,7 @@ mod tests {
             low_graphics: false,
             lighter: Some(render),
             custom: BTreeMap::new(),
+            mute: false,
         }
     }
 
@@ -781,8 +843,10 @@ mod tests {
         let g = GraphicsSettings::default();
         assert!(!g.enabled);
         assert_eq!(g.fps_cap, 0);
-        assert!(g.low_graphics);
-        assert!(g.lighter_rendering);
+        // Roblox's own defaults: nothing changes until the user asks.
+        assert!(!g.low_graphics);
+        assert!(!g.lighter_rendering);
+        assert!(!g.mute_volume);
         assert!(g.custom_flags.is_empty());
         let r = g.render;
         assert_eq!(r.msaa, Msaa::X1);
@@ -932,6 +996,7 @@ mod tests {
             low_graphics: true,
             lighter: None,
             custom: map(&[("FFlagUser", "1")]),
+            mute: false,
         };
         assert_eq!(flag_set(&e), map(&[("FFlagUser", "1")]));
         let e = Effective {
@@ -1278,7 +1343,8 @@ mod tests {
                 framerate_cap: Some(30),
                 quality_level: Some(1),
                 saved_quality: Some(1),
-            },
+            master_volume: None,
+        },
         );
         let expect = SAMPLE_XML
             .replace("<int name=\"FramerateCap\">60</int>", "<int name=\"FramerateCap\">30</int>")
@@ -1313,7 +1379,8 @@ mod tests {
                 framerate_cap: Some(30),
                 quality_level: Some(1),
                 saved_quality: Some(1),
-            },
+            master_volume: None,
+        },
         );
         let expect = EMPTY_XML.replace(
             "\t\t<Properties>\n\t\t</Properties>",
@@ -1380,12 +1447,14 @@ mod tests {
             framerate_cap: Some(60),
             quality_level: Some(10),
             saved_quality: Some(0),
-        };
+        master_volume: None,
+    };
         let e = Effective {
             fps_cap: 30,
             low_graphics: true,
             lighter: None,
             custom: BTreeMap::new(),
+            mute: false,
         };
         assert_eq!(
             xml_for_launch(&e, &current),
@@ -1393,13 +1462,15 @@ mod tests {
                 framerate_cap: Some(30),
                 quality_level: Some(1),
                 saved_quality: Some(1),
-            }
+            master_volume: None,
+        }
         );
         let e = Effective {
             fps_cap: 0,
             low_graphics: false,
             lighter: None,
             custom: BTreeMap::new(),
+            mute: false,
         };
         assert_eq!(xml_for_launch(&e, &current), current);
         assert_eq!(xml_for_launch(&e, &XmlValues::default()), XmlValues::default());
@@ -1423,7 +1494,8 @@ mod tests {
             framerate_cap: Some(30),
             quality_level: Some(1),
             saved_quality: Some(1),
-        };
+        master_volume: None,
+    };
         let undo = file.apply(&want).unwrap();
         assert_eq!(undo.path, path);
         assert_eq!(
@@ -1431,11 +1503,13 @@ mod tests {
             XmlValues {
                 framerate_cap: Some(60),
                 quality_level: Some(10),
-                saved_quality: Some(0)
+                saved_quality: Some(0),
+                master_volume: Some(500),
             }
         );
         assert_eq!(undo.ours, want);
-        assert_eq!(xml_get(&fs::read_to_string(&path).unwrap()), want);
+        // The sample file's own volume (0.5) is untouched by this launch.
+        assert_eq!(xml_get(&fs::read_to_string(&path).unwrap()), XmlValues { master_volume: Some(500), ..want.clone() });
         assert!(!with_suffix(&path, ".ram-tmp").exists());
         // persistable
         let json = serde_json::to_string(&undo).unwrap();
@@ -1457,7 +1531,8 @@ mod tests {
             framerate_cap: Some(30),
             quality_level: Some(1),
             saved_quality: Some(1),
-        };
+        master_volume: None,
+    };
         let undo = file.apply(&want).unwrap();
         assert_eq!(undo.user, XmlValues::default());
         let text = fs::read_to_string(&path).unwrap();
@@ -1493,7 +1568,8 @@ mod tests {
             framerate_cap: Some(30),
             quality_level: Some(1),
             saved_quality: Some(1),
-        };
+        master_volume: None,
+    };
         let undo = XmlFile::new(&path).apply(&want).unwrap();
         // the client (or the user) changed the cap and the quality level,
         // SavedQualityLevel still holds ours
@@ -1565,7 +1641,8 @@ mod tests {
             framerate_cap: Some(30),
             quality_level: Some(1),
             saved_quality: Some(1),
-        };
+        master_volume: None,
+    };
         let undo = XmlFile::new(&path).apply(&want).unwrap();
         undo.put_back().unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), SAMPLE_XML);
@@ -1603,13 +1680,38 @@ mod tests {
             framerate_cap: Some(30),
             quality_level: Some(1),
             saved_quality: Some(1),
-        };
+        master_volume: None,
+    };
         let undo = XmlFile::new(&path).apply(&want).unwrap();
         assert!(settle(&path, &undo).unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), without);
     }
 
     // ----- log detection -----
+
+    #[test]
+    fn volume_is_written_as_a_float_and_restored() {
+        let dir = TempDir::new("volume");
+        let path = dir.path("GlobalBasicSettings_13.xml");
+        let with_volume = EMPTY_XML.replace("\t\t</Properties>", "\t\t\t<float name=\"MasterVolume\">0.75</float>\n\t\t</Properties>");
+        fs::write(&path, with_volume).unwrap();
+        let file = XmlFile::new(&path);
+        let (_, before) = file.read();
+        assert_eq!(before.master_volume, Some(750));
+        let g = GraphicsSettings { mute_volume: true, ..enabled() };
+        let e = effective(&g, &AccountGraphics::default(), false).unwrap();
+        assert!(e.mute);
+        let undo = file.apply(&xml_for_launch(&e, &before)).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("<float name=\"MasterVolume\">0</float>"));
+        undo.put_back().unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("<float name=\"MasterVolume\">0.75</float>"));
+        // Full quality keeps its sound.
+        let fq = effective(&g, &AccountGraphics { full_quality: true, ..Default::default() }, false).unwrap();
+        assert!(!fq.mute);
+        assert_eq!(milli_text(1000), "1");
+        assert_eq!(milli_text(500), "0.5");
+        assert_eq!(milli_text(0), "0");
+    }
 
     #[test]
     fn read_marks() {

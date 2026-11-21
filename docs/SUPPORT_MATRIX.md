@@ -1,6 +1,6 @@
 # Support matrix
 
-This describes **RAM v0.3**, the Tauri + React application in `app/`. Each
+This describes **RAM v0.4**, the Tauri + React application in `app/`. Each
 feature has one status:
 
 - **Verified** — exercised on Windows 11 (build 26300) during development,
@@ -56,6 +56,9 @@ handler, which is what the "on this PC" notes refer to.
 | Add an account by signing in inside your browser (cookie captured into the vault) | Conditional | **Yes** | Open Browser without a cookie shows roblox.com/login in that account's profile; Capture session reads the cookie back over DevTools. The mechanism is tested with a fake cookie (see Open Browser); a real Roblox sign-in, CAPTCHA and 2-step pages included, was not performed. |
 | Add an account by pasting `.ROBLOSECURITY` | Conditional | Yes | RAM asks Roblox whose cookie it is and creates or refreshes that account; the line parser (bare value, `.ROBLOSECURITY=`, `user:pass:cookie`, `username:password` refused) is unit-tested. |
 | Add many at once (cookies one per line) | Conditional | Yes | Sequential, 0.7 s apart, with a progress count and a per-line problem list. |
+| Bulk `username:password` queue: sign-in page opened, filled and submitted one account at a time | Conditional | **Yes** | The form filler is tested in a real Brave window against a local stand-in form with Roblox's field ids (values with quotes and spaces included), and the ids were checked on roblox.com/login on 2026-11-21. A real sign-in, its checks and the 4-minute timeout were not exercised. |
+| Saved passwords (vault), copy password / username:password behind Hello or the master password | Verified | No | Sealing, reopen, locked state and removal unit-tested; the copy gate is the cookie one. |
+| Sign-in method shown per account (cookie only / browser sign-in / login + password) | Verified | No | Screenshotted. |
 | Sign in with Roblox (Add dialog): the browser opens on the sign-in page, RAM polls for the session and captures it | Conditional | **Yes** | Uses the same DevTools mechanism as Open Browser on a `sign-in` profile that is signed out after capture; a real sign-in was not performed. |
 | Login check (RoALT's method): `GET users.roblox.com/v1/users/authenticated` | Conditional | **Yes** | Classification unit-tested on scripted responses: 200 valid; 401 signed out; 401 + error 9002/2 *bound session required*; 403 + `rblx-challenge-id` *verification required*; 429 and transport errors leave the state untouched. Not run against live Roblox. |
 | Rotated cookie from `Set-Cookie` replaces the stored one | Conditional | Yes | Unit-tested on a scripted response. |
@@ -67,7 +70,7 @@ handler, which is what the "on this PC" notes refer to.
 
 | Feature | Status | Needs live test | Notes |
 |---|---|---|---|
-| Default browser detected (`UrlAssociations\https` → ProgId → command) | Verified | No | Brave found on this PC; Chrome/Edge/Vivaldi/Opera/Chromium recognised by exe name; unit tests on the command parsing. |
+| Default browser detected (`UserChoiceLatest`, then `UserChoice` → ProgId → command); browser can be pinned in Settings | Verified | No | Brave found on this PC; Chrome/Edge/Vivaldi/Opera/Chromium recognised by exe name; unit tests on the command parsing. |
 | Firefox or another non-Chromium default | Conditional | No | Falls back to the first installed Chromium browser (Brave, Chrome, Edge, Vivaldi at their usual paths); with none, the button explains. Not driven on this PC. |
 | Separate profile per account (`browser-profiles\<id>`), cookie injected over DevTools (`Storage.setCookies`) | Verified | No | Integration test against Brave 158 on this PC with a fresh scratch profile and a fake cookie: open, read back, reuse of the open window, close, cookie files deleted. |
 | Signed in on roblox.com with a real session | Conditional | **Yes** | The cookie attributes match RoALT's (`.roblox.com`, Secure, HttpOnly, Lax). Whether roblox.com accepts the injected session in Brave was not verified with a real cookie. |
@@ -97,7 +100,13 @@ handler, which is what the "on this PC" notes refer to.
 | Written before each launch, restored after the client reads them | Conditional | Yes | The watcher looks for `LoadClientSettingsFromLocal` / `Replicator created` / `resizing main targets` in the client's log, waits 1 s and restores; a 60 s timeout restores anyway. Not observed with a real client. |
 | Per-account FPS cap and Full quality; Main never touched | Verified | No | Unit tests on the effective-settings rules. |
 | User's values put back after a crash or when a client re-saves the XML on exit | Conditional | Yes | The pending restore is kept in `store.json` and finished at the next start; unit-tested, not observed live. |
-| Window layout, minimize, mute, CPU limits (RoALT's other controls) | Unavailable | — | Not built in v0.3. |
+| Volume 0 through `MasterVolume` in the XML | Conditional | Yes | Write and restore unit-tested, including a user value such as 0.75. |
+| Minimize on launch, Minimize all / Restore all | Conditional | Yes | Tested on windows the tests created (no focus steal); not on a Roblox client. |
+| Start clients tiny (below Roblox's 816×638 minimum) | Conditional | Yes | A test window enforcing that minimum was shrunk to 240×180 and restored; a client restored from minimized grows back and is not re-shrunk. |
+| Mute clients on launch (Windows volume mixer) | Conditional | Yes | Muted and unmuted the test process's own audio session; not a Roblox client. |
+| CPU limit and efficiency mode for background alt clients | Conditional | Yes | Job-object cap and efficiency mode are unit-tested on stand-in processes; the foreground switch was not observed with clients. |
+| Memory trim on a schedule | Conditional | Yes | Trim call tested on a child process. |
+| Bandwidth limit (QoS policy, administrator prompt) | Conditional | Yes | Only the command text is tested; the elevated step was deliberately never run during development. |
 
 ## Diagnostics
 
@@ -129,7 +138,9 @@ handler, which is what the "on this PC" notes refer to.
 |---|---|---|---|
 | Preview-first import of usernames, aliases, groups, descriptions, user IDs | Verified | No | 34 tests on synthetic 3.7.2-format files; the DPAPI-protected file from the real legacy app on this PC decrypts (27 accounts). |
 | Import cookies into the vault (switch), also for accounts already present | Verified | No | Unit tests on unencrypted and DPAPI-protected files; matched by username or legacy user id. |
-| Password-protected `AccountData.json` | Unavailable | — | Remove the password in the legacy app first. |
+| Password-protected `AccountData.json` | Verified | No | SHA-512 + Argon2i (ops 6, 128 MiB) + secretbox; a test file encrypted by the legacy app's own libsodium.dll opens, wrong passwords and tampering are refused. A file written by the real legacy app with a password was not available. |
+| Find `AccountData.json` and backups on the PC | Verified | No | Bounded search (8 s) of the user folder, OneDrive and other drives; found the real files on the dev PC. Cloud placeholders are listed without being downloaded. |
+| Import saved passwords from the legacy file | Verified | No | Unit-tested on synthetic files. |
 | Export to `AccountData.json`, plain or with DPAPI-protected cookies | Verified | No | Round-trips through the importer in tests. |
 
 ## Removed from the legacy app

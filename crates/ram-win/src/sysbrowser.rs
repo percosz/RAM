@@ -145,11 +145,13 @@ fn parse_command_exe(command: &str) -> Option<PathBuf> {
 
 /// The browser registered as the user's `https` handler.
 pub fn default_browser() -> Option<Browser> {
-    let prog_id = reg_sz(
-        HKEY_CURRENT_USER,
-        r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
-        Some("ProgId"),
-    )?;
+    // Newer Windows 11 builds record the choice under `UserChoiceLatest` and
+    // can leave the older `UserChoice` key pointing at the previous browser,
+    // so the newer key wins when it exists.
+    const ASSOC: &str = r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https";
+    let prog_id = reg_sz(HKEY_CURRENT_USER, &format!(r"{ASSOC}\UserChoiceLatest\ProgId"), Some("ProgId"))
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| reg_sz(HKEY_CURRENT_USER, &format!(r"{ASSOC}\UserChoice"), Some("ProgId")))?;
     let prog_id = prog_id.trim();
     if prog_id.is_empty() {
         return None;
@@ -493,9 +495,19 @@ impl Cdp {
     /// Sends one CDP command and returns its `result`, or `Err` with the
     /// protocol error text. Events and other replies are skipped.
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.call_in(None, method, params)
+    }
+
+    /// Like `call`, addressed to an attached target session (flat mode)
+    /// when `session` is given.
+    fn call_in(&mut self, session: Option<&str>, method: &str, params: Value) -> Result<Value, String> {
         self.next_id += 1;
         let id = self.next_id;
-        let msg = json!({ "id": id, "method": method, "params": params }).to_string();
+        let mut envelope = json!({ "id": id, "method": method, "params": params });
+        if let Some(s) = session {
+            envelope["sessionId"] = json!(s);
+        }
+        let msg = envelope.to_string();
         self.send_frame(OP_TEXT, msg.as_bytes())?;
         let deadline = Instant::now() + CALL_TIMEOUT;
         loop {
@@ -1040,5 +1052,167 @@ mod tests {
         wipe_profile(&profile).expect("wipe_profile");
         assert!(!profile.exists());
         eprintln!("profile wiped");
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Pages: open one, and fill Roblox's sign-in form
+// ---------------------------------------------------------------------------
+
+/// Opens `url` in a new tab of the running browser on `profile_dir` and
+/// closes every other tab, so a queue of sign-ins never piles tabs up.
+pub fn open_page(profile_dir: &Path, url: &str) -> Result<(), String> {
+    let mut cdp = Cdp::connect(profile_dir).map_err(|_| "The browser window is not open".to_string())?;
+    let created = cdp.call("Target.createTarget", json!({ "url": url, "newWindow": false }))?;
+    let keep = created.get("targetId").and_then(Value::as_str).unwrap_or("").to_string();
+    if let Ok(list) = cdp.call("Target.getTargets", json!({})) {
+        let others: Vec<String> = list
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|t| t.get("type").and_then(Value::as_str) == Some("page"))
+            .filter_map(|t| t.get("targetId").and_then(Value::as_str).map(str::to_string))
+            .filter(|id| *id != keep)
+            .collect();
+        for id in others {
+            let _ = cdp.call("Target.closeTarget", json!({ "targetId": id }));
+        }
+    }
+    cdp.close();
+    Ok(())
+}
+
+/// What `fill_login` managed to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginFill {
+    /// The form was filled and its Sign in button pressed.
+    Submitted,
+    /// The form was filled; the button was not found, so the user presses it.
+    Filled,
+    /// No sign-in form appeared on the page.
+    NoForm,
+}
+
+/// The script that fills Roblox's sign-in form. The values are embedded as
+/// JSON string literals, so no character in a password can break out.
+fn login_script(username: &str, password: &str, submit: bool) -> String {
+    let u = serde_json::to_string(username).unwrap_or_else(|_| "\"\"".into());
+    let p = serde_json::to_string(password).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        r#"(async (u, p, submit) => {{
+  const wait = (sel, ms) => new Promise((res) => {{
+    const t0 = Date.now();
+    const tick = () => {{ const el = document.querySelector(sel); if (el) return res(el); if (Date.now() - t0 > ms) return res(null); setTimeout(tick, 150); }};
+    tick();
+  }});
+  const user = await wait('#login-username', 7000);
+  const pass = user ? await wait('#login-password', 1500) : null;
+  if (!user || !pass) return 'no-form';
+  const set = (el, v) => {{
+    const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    el.focus(); d.set.call(el, v);
+    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+  }};
+  set(user, u); set(pass, p);
+  if (!submit) return 'filled';
+  await new Promise((r) => setTimeout(r, 250));
+  const form = user.closest('form');
+  const btn = document.querySelector('#login-button') || (form && form.querySelector('button[type="submit"]'));
+  if (btn) {{ btn.click(); return 'submitted'; }}
+  return 'filled';
+}})({u}, {p}, {submit})"#
+    )
+}
+
+/// Fills (and optionally submits) Roblox's sign-in form in the tab showing
+/// it. The password travels only over the browser's loopback DevTools
+/// socket; it is never part of an error string.
+pub fn fill_login(profile_dir: &Path, username: &str, password: &str, submit: bool) -> Result<LoginFill, String> {
+    let mut cdp = Cdp::connect(profile_dir).map_err(|_| "The browser window is not open".to_string())?;
+    let list = cdp.call("Target.getTargets", json!({}))?;
+    let pages: Vec<(String, String)> = list
+        .get("targetInfos")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|t| t.get("type").and_then(Value::as_str) == Some("page"))
+        .filter_map(|t| Some((t.get("targetId")?.as_str()?.to_string(), t.get("url").and_then(Value::as_str).unwrap_or("").to_string())))
+        .collect();
+    let target = pages
+        .iter()
+        .find(|(_, url)| url.contains("roblox.com"))
+        .or_else(|| pages.first())
+        .map(|(id, _)| id.clone())
+        .ok_or("The sign-in page is not open")?;
+    let attached = cdp.call("Target.attachToTarget", json!({ "targetId": target, "flatten": true }))?;
+    let session = attached.get("sessionId").and_then(Value::as_str).ok_or("could not attach to the sign-in page")?.to_string();
+    let result = cdp.call_in(
+        Some(&session),
+        "Runtime.evaluate",
+        json!({ "expression": login_script(username, password, submit), "awaitPromise": true, "returnByValue": true }),
+    );
+    let _ = cdp.call("Target.detachFromTarget", json!({ "sessionId": session }));
+    cdp.close();
+    // Never surface the protocol error text: it can echo the expression.
+    let value = result.map_err(|_| "the sign-in form could not be filled".to_string())?;
+    Ok(match value.get("result").and_then(|r| r.get("value")).and_then(Value::as_str) {
+        Some("submitted") => LoginFill::Submitted,
+        Some("filled") => LoginFill::Filled,
+        _ => LoginFill::NoForm,
+    })
+}
+
+#[cfg(test)]
+mod login_tests {
+    use super::*;
+
+    #[test]
+    fn login_script_embeds_values_as_json_literals() {
+        let s = login_script("bob_1", "p\"a'ss\\word\n</script>", true);
+        assert!(s.contains("(\"bob_1\", \"p\\\"a'ss\\\\word\\n</script>\", true)"), "{s}");
+        assert!(s.contains("#login-username") && s.contains("button[type=\"submit\"]"));
+        assert!(login_script("a", "b", false).ends_with("(\"a\", \"b\", false)"));
+    }
+
+    /// Opens a real Chromium browser on a scratch profile showing a local
+    /// stand-in for Roblox's sign-in form (same field ids), fills and submits
+    /// it, and reads back what the page received. Never touches roblox.com.
+    #[test]
+    #[ignore = "opens a browser window"]
+    fn fill_login_round_trip() {
+        let browser = match default_browser() {
+            Some(b) if b.chromium => b,
+            _ => known_chromium_browsers().into_iter().next().expect("a Chromium browser"),
+        };
+        let dir = std::env::temp_dir().join(format!("ram-login-test-{}", std::process::id()));
+        let page = "data:text/html,<title>form</title><form name=loginForm onsubmit=\"document.title='ok-'+document.getElementById('login-username').value+'-'+document.getElementById('login-password').value.length;return false\"><input id=login-username><input id=login-password type=password><button type=submit>Sign in</button></form>";
+        let session = open_signed_in(&browser, &dir, None, page, "test").expect("browser opens");
+        // Collect everything first, then always close the browser, then
+        // assert: a failed assertion must not leave a browser running.
+        std::thread::sleep(Duration::from_millis(800));
+        let got = fill_login(&dir, "bob_1", "p\"a'ss word", true);
+        std::thread::sleep(Duration::from_millis(400));
+        let titles = |dir: &Path| -> Vec<String> {
+            let Ok(mut cdp) = Cdp::connect(dir) else { return Vec::new() };
+            let list = cdp.call("Target.getTargets", json!({})).unwrap_or(Value::Null);
+            cdp.close();
+            list["targetInfos"].as_array().map(|a| a.iter().filter(|t| t["type"] == "page").filter_map(|t| t["title"].as_str().map(str::to_string)).collect()).unwrap_or_default()
+        };
+        let after_fill = titles(&dir);
+        let opened = open_page(&dir, "about:blank");
+        let after_open = titles(&dir);
+        let closed = close(&dir);
+        let exited = wait_exit(session.pid, Duration::from_secs(20));
+        let _ = wipe_profile(&dir);
+
+        assert_eq!(got, Ok(LoginFill::Submitted));
+        assert!(after_fill.iter().any(|t| t == "ok-bob_1-11"), "{after_fill:?}");
+        // open_page replaces the tab instead of piling tabs up.
+        assert!(opened.is_ok());
+        assert_eq!(after_open.len(), 1, "{after_open:?}");
+        assert!(closed.is_ok() && exited);
     }
 }

@@ -325,7 +325,7 @@ fn apply_graphics(app: &AppHandle, id: AccountId) -> Option<(Option<client_setti
     let eff = client_settings::effective(&s.store.graphics, &s.store.account_graphics(id), s.store.is_main(id))?;
     let mut notes = Vec::new();
     let mut xml_undo = None;
-    if eff.fps_cap > 0 || eff.low_graphics {
+    if eff.fps_cap > 0 || eff.low_graphics || eff.mute {
         let path = ram_win::paths::local_app_data().map(|p| p.join("Roblox").join("GlobalBasicSettings_13.xml"));
         if let Some(path) = path {
             let file = client_settings::XmlFile::new(path);

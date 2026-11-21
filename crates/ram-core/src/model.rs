@@ -38,6 +38,8 @@ pub struct Store {
     /// The user's own `GlobalBasicSettings` values while a launch has ours
     /// in place, so a crash mid-launch can still put them back.
     pub xml_undo: Option<crate::client_settings::XmlUndo>,
+    /// Window, sound, CPU, memory and bandwidth limits for alt clients.
+    pub limits: LimitSettings,
 }
 
 impl Default for Store {
@@ -58,6 +60,7 @@ impl Default for Store {
             graphics: Default::default(),
             crashes: Vec::new(),
             xml_undo: None,
+            limits: LimitSettings::default(),
         };
         s.ensure_builtin_games();
         s
@@ -200,6 +203,21 @@ pub struct Account {
     /// still applies). Main is always exempt from everything.
     #[serde(default)]
     pub full_quality: bool,
+    /// How the stored session was obtained.
+    #[serde(default)]
+    pub method: SignInMethod,
+}
+
+/// How an account's session got into the vault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SignInMethod {
+    #[default]
+    Unknown,
+    /// A pasted or imported `.ROBLOSECURITY` cookie.
+    Cookie,
+    /// A sign-in in the browser (by hand, or filled from username and
+    /// password).
+    Login,
 }
 
 impl Default for Account {
@@ -227,6 +245,7 @@ impl Default for Account {
             avatar_at: None,
             fps_cap: None,
             full_quality: false,
+            method: SignInMethod::Unknown,
         }
     }
 }
@@ -511,6 +530,9 @@ pub struct Settings {
     /// Show only the first three characters of each username (for
     /// screenshots and streams).
     pub hide_usernames: bool,
+    /// Browser for Open Browser and sign-in: empty follows the Windows
+    /// default; otherwise the full path of a Chromium-based browser.
+    pub browser: String,
     pub window: Option<Rect>,
     pub last_import_dir: String,
 }
@@ -529,6 +551,7 @@ impl Default for Settings {
             check_updates: true,
             seen_version: String::new(),
             hide_usernames: false,
+            browser: String::new(),
             window: None,
             last_import_dir: String::new(),
         }
@@ -605,6 +628,58 @@ pub struct AppliedOverride {
     pub cpu_cap: bool,
     /// Window placement before tiling.
     pub original_rect: Option<Rect>,
+}
+
+/// Limits RAM puts on running alt clients (never on Main or Full-quality
+/// accounts). Everything is off by default and undone when switched off or
+/// when the client exits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LimitSettings {
+    /// Minimize each alt client once it has joined a game.
+    pub minimize_on_launch: bool,
+    /// Shrink each alt client's window once it has joined a game.
+    pub tiny_on_launch: bool,
+    pub tiny_width: u32,
+    pub tiny_height: u32,
+    /// Mute each alt client in the Windows volume mixer once it has joined.
+    pub mute_on_launch: bool,
+    /// CPU limit (percent of the whole machine) for alt clients that are not
+    /// the foreground window. 0 = off.
+    pub cpu_limit_percent: u32,
+    /// Windows efficiency mode for background alt clients.
+    pub efficiency_mode: bool,
+    /// Page alt clients' memory out every N minutes. 0 = off.
+    pub trim_every_min: u32,
+    /// Bandwidth limit for all Roblox clients in kbit/s (Windows QoS
+    /// policy; needs an administrator prompt). 0 = off.
+    pub bandwidth_kbps: u32,
+}
+
+impl Default for LimitSettings {
+    fn default() -> Self {
+        LimitSettings {
+            minimize_on_launch: false,
+            tiny_on_launch: false,
+            tiny_width: 320,
+            tiny_height: 240,
+            mute_on_launch: false,
+            cpu_limit_percent: 0,
+            efficiency_mode: false,
+            trim_every_min: 0,
+            bandwidth_kbps: 0,
+        }
+    }
+}
+
+impl LimitSettings {
+    pub fn tiny_size(&self) -> (i32, i32) {
+        (self.tiny_width.clamp(160, 1920) as i32, self.tiny_height.clamp(120, 1080) as i32)
+    }
+    /// True when any per-client limit is switched on.
+    pub fn any_client_limit(&self) -> bool {
+        self.minimize_on_launch || self.tiny_on_launch || self.mute_on_launch || self.cpu_limit_percent > 0 || self.efficiency_mode || self.trim_every_min > 0
+    }
 }
 
 /// How a Roblox client ended, as seen in its log (Diagnostics → Crash

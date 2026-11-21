@@ -150,6 +150,10 @@ struct VaultFile {
     /// Per-account encrypted cookie: nonce(12) + AES-256-GCM ciphertext.
     #[serde(default)]
     secrets: BTreeMap<AccountId, String>,
+    /// Per-account encrypted Roblox password, kept only for accounts added
+    /// by username and password. Same sealing as the cookies.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    passwords: BTreeMap<AccountId, String>,
 }
 
 fn yes() -> bool {
@@ -256,6 +260,7 @@ impl Vault {
             auto_lock_secs,
             require_hello_reveal: true,
             secrets: BTreeMap::new(),
+            passwords: BTreeMap::new(),
         });
         self.dek = Some(Zeroizing::new(dek));
         self.save()?;
@@ -288,6 +293,7 @@ impl Vault {
             auto_lock_secs,
             require_hello_reveal: true,
             secrets: BTreeMap::new(),
+            passwords: BTreeMap::new(),
         });
         self.dek = Some(Zeroizing::new(dek));
         self.save()?;
@@ -412,6 +418,44 @@ impl Vault {
     pub fn remove_secret(&mut self, account: AccountId) -> Result<()> {
         if let Some(file) = self.file.as_mut() {
             if file.secrets.remove(&account).is_some() {
+                self.save()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Encrypts and stores a Roblox password for an account. Requires an
+    /// unlocked vault.
+    pub fn set_password(&mut self, account: AccountId, password: &str, entropy: &dyn Entropy, now: i64) -> Result<()> {
+        let dek = self.dek.as_ref().ok_or(VaultError::Locked)?.clone();
+        let blob = seal(&dek, password.as_bytes(), entropy)?;
+        let file = self.file.as_mut().ok_or(VaultError::NotConfigured)?;
+        file.passwords.insert(account, to_hex(&blob));
+        self.last_activity = Some(now);
+        self.save()
+    }
+
+    /// Decrypts the stored password for an account. Requires an unlocked
+    /// vault; the caller gates it like a cookie reveal.
+    pub fn password(&self, account: AccountId) -> Result<Option<Zeroizing<String>>> {
+        let dek = self.dek.as_ref().ok_or(VaultError::Locked)?;
+        let file = self.file.as_ref().ok_or(VaultError::NotConfigured)?;
+        let Some(hex) = file.passwords.get(&account) else {
+            return Ok(None);
+        };
+        let blob = from_hex(hex)?;
+        let plain = open(dek, &blob)?;
+        let text = String::from_utf8(plain.to_vec()).map_err(|_| VaultError::Crypto("not text".into()))?;
+        Ok(Some(Zeroizing::new(text)))
+    }
+
+    pub fn has_password(&self, account: AccountId) -> bool {
+        self.file.as_ref().map(|f| f.passwords.contains_key(&account)).unwrap_or(false)
+    }
+
+    pub fn remove_password(&mut self, account: AccountId) -> Result<()> {
+        if let Some(file) = self.file.as_mut() {
+            if file.passwords.remove(&account).is_some() {
                 self.save()?;
             }
         }
@@ -652,6 +696,35 @@ mod tests {
     }
 
     const COOKIE: &str = "_|WARNING:-DO-NOT-SHARE-THIS...|_SECRETCOOKIEVALUE";
+
+    #[test]
+    fn passwords_are_sealed_beside_cookies_and_never_in_clear() {
+        let (e, p) = (SeqEntropy::new(), XorProtector);
+        let path = temp("passwords");
+        let mut v = Vault::open(&path).unwrap();
+        v.setup_dpapi(&e, &p, 0).unwrap();
+        assert!(!v.has_password(3));
+        assert_eq!(v.password(3).unwrap(), None);
+        v.set_secret(3, COOKIE, &e, 0).unwrap();
+        v.set_password(3, "hunter2-PLAINTEXT", &e, 0).unwrap();
+        assert!(v.has_password(3) && v.has_secret(3));
+        assert_eq!(v.password(3).unwrap().unwrap().as_str(), "hunter2-PLAINTEXT");
+        // Nothing readable on disk.
+        let disk = std::fs::read_to_string(&path).unwrap();
+        assert!(!disk.contains("hunter2-PLAINTEXT") && !disk.contains("SECRETCOOKIEVALUE"));
+        // Survives a reopen; locked means unreadable.
+        let mut v2 = Vault::open(&path).unwrap();
+        assert!(v2.has_password(3));
+        assert_eq!(v2.password(3), Err(VaultError::Locked));
+        v2.unlock_dpapi(&p, 0).unwrap();
+        assert_eq!(v2.password(3).unwrap().unwrap().as_str(), "hunter2-PLAINTEXT");
+        // Removing the password leaves the cookie, and an old vault file
+        // without the map still loads (serde default).
+        v2.remove_password(3).unwrap();
+        assert!(!v2.has_password(3) && v2.has_secret(3));
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("\"passwords\""));
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn dpapi_setup_store_reopen_and_read() {

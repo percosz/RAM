@@ -11,7 +11,7 @@
 use crate::state::{now, Shared};
 use ram_core::clientlog::{self, EndKind, LogFacts, Tail};
 use ram_core::model::{AccountId, CrashRecord};
-use ram_core::platform::{ProcKey, ProcessApi};
+use ram_core::platform::{JobApi, ProcKey, ProcessApi};
 use ram_core::redact::{redact, Level};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -35,9 +35,21 @@ pub struct Watch {
     /// Crash dumps present when the client started, to spot a new one.
     pub dumps_at_start: usize,
     pub closed_by_ram: bool,
+    /// What the limits have done to this client so far.
+    pub limits: Applied,
 }
 
+/// Limits applied to one client, so each is done once and undone when the
+/// setting goes off.
 #[derive(Default)]
+pub struct Applied {
+    /// Tiny / minimize / mute were issued after the client joined a game.
+    pub on_join: bool,
+    pub cpu_capped: bool,
+    pub efficiency: bool,
+    pub last_trim: i64,
+}
+
 pub struct DiagState {
     pub watched: HashMap<ProcKey, Watch>,
     pub launches: Vec<PendingLaunch>,
@@ -45,6 +57,53 @@ pub struct DiagState {
     pub reads: HashMap<String, bool>,
     /// Processes RAM asked to close, so they are recorded as Closed.
     pub closing: Vec<u32>,
+    /// Job objects behind the CPU limits.
+    pub jobs: ram_win::WinJobs,
+}
+
+impl Default for DiagState {
+    fn default() -> Self {
+        DiagState { watched: HashMap::new(), launches: Vec::new(), reads: HashMap::new(), closing: Vec::new(), jobs: ram_win::WinJobs::new() }
+    }
+}
+
+/// Something to do to a client window or process outside the state lock
+/// (these calls can wait on the client for up to a second).
+enum Act {
+    OnJoin { pid: u32, tiny: Option<(i32, i32)>, minimize: bool, mute: bool },
+    Trim { pid: u32 },
+}
+
+fn perform(acts: Vec<Act>) {
+    if acts.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        for act in acts {
+            match act {
+                Act::OnJoin { pid, tiny, minimize, mute } => {
+                    if let Some((w, h)) = tiny {
+                        let _ = ram_win::client_ctl::set_tiny(pid, w, h);
+                    }
+                    if minimize {
+                        let _ = ram_win::client_ctl::minimize(pid);
+                    }
+                    if mute {
+                        // The audio session appears a little after the join.
+                        for _ in 0..6 {
+                            match ram_win::client_ctl::set_mute(pid, true) {
+                                Ok(n) if n > 0 => break,
+                                _ => std::thread::sleep(Duration::from_secs(2)),
+                            }
+                        }
+                    }
+                }
+                Act::Trim { pid } => {
+                    let _ = ram_win::client_ctl::trim_memory(pid);
+                }
+            }
+        }
+    });
 }
 
 #[derive(Serialize, Clone)]
@@ -147,6 +206,11 @@ fn tick(app: &AppHandle) {
     let _ = s.clients.observe(t, &snapshot, timeout);
     s.diag.launches.retain(|l| t - l.at < 180);
 
+    // Accounts whose launch line should clear: their client is now known
+    // (Running) or gone (Exited).
+    let mut seen_running: Vec<AccountId> = Vec::new();
+    let mut seen_exited: Vec<AccountId> = Vec::new();
+
     // New clients.
     let logs = logs_dir();
     let mut new_watch = Vec::new();
@@ -184,7 +248,10 @@ fn tick(app: &AppHandle) {
             tail.as_ref().map(|t| t.path.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_else(|| "not found yet".into()),
             account
         ));
-        s.diag.watched.insert(key, Watch { account, started, tail, facts: LogFacts::default(), browser_tracker_id: btid, dumps_at_start: dumps, closed_by_ram: false });
+        s.diag.watched.insert(key, Watch { account, started, tail, facts: LogFacts::default(), browser_tracker_id: btid, dumps_at_start: dumps, closed_by_ram: false, limits: Applied::default() });
+        if let Some(id) = account {
+            seen_running.push(id);
+        }
     }
 
     // Tail logs; bind late logs; learn accounts from the join line.
@@ -236,6 +303,7 @@ fn tick(app: &AppHandle) {
     }
     for (key, id) in assign {
         s.clients.assign(key, id);
+        seen_running.push(id);
         s.log.info(&format!("client {} belongs to account {id} (from its log)", key.pid));
     }
     for b in reads {
@@ -267,7 +335,57 @@ fn tick(app: &AppHandle) {
         }
         s.diag.launches.retain(|l| l.browser_tracker_id != b);
         s.clients.assign(key, acc);
+        seen_running.push(acc);
     }
+
+    // ---- limits for alt clients (never Main, Full quality or unknown) ------
+    let limits = s.store.limits.clone();
+    let foreground = ram_win::client_ctl::foreground_pid();
+    let mut acts: Vec<Act> = Vec::new();
+    for key in &keys {
+        if !alive.contains(key) {
+            continue;
+        }
+        let Some(account) = s.diag.watched.get(key).and_then(|w| w.account) else { continue };
+        let exempt = s.store.is_main(account) || s.store.account(account).map(|a| a.full_quality).unwrap_or(true);
+        let in_game = s.diag.watched.get(key).map(|w| w.facts.in_game).unwrap_or(false);
+        let background = foreground != Some(key.pid);
+        let want_cap = !exempt && background && limits.cpu_limit_percent > 0;
+        let want_eff = !exempt && background && limits.efficiency_mode;
+        let (was_cap, was_eff, on_join, last_trim) = {
+            let w = &s.diag.watched[key];
+            (w.limits.cpu_capped, w.limits.efficiency, w.limits.on_join, w.limits.last_trim)
+        };
+        if want_cap != was_cap || (want_cap && !s.diag.jobs.has_cpu_cap(*key)) {
+            let ok = if want_cap { s.diag.jobs.apply_cpu_cap(*key, limits.cpu_limit_percent.clamp(1, 100)).is_ok() } else { s.diag.jobs.clear_cpu_cap(*key).is_ok() };
+            if ok {
+                if let Some(w) = s.diag.watched.get_mut(key) {
+                    w.limits.cpu_capped = want_cap;
+                }
+            }
+        }
+        if want_eff != was_eff && s.procs.set_efficiency_mode(*key, want_eff).is_ok() {
+            if let Some(w) = s.diag.watched.get_mut(key) {
+                w.limits.efficiency = want_eff;
+            }
+        }
+        if !exempt && in_game && !on_join && (limits.tiny_on_launch || limits.minimize_on_launch || limits.mute_on_launch) {
+            acts.push(Act::OnJoin { pid: key.pid, tiny: limits.tiny_on_launch.then(|| limits.tiny_size()), minimize: limits.minimize_on_launch, mute: limits.mute_on_launch });
+            if let Some(w) = s.diag.watched.get_mut(key) {
+                w.limits.on_join = true;
+            }
+            s.log.info(&format!("limits: client {} joined a game; tiny {}, minimize {}, mute {}", key.pid, limits.tiny_on_launch, limits.minimize_on_launch, limits.mute_on_launch));
+        }
+        if !exempt && limits.trim_every_min > 0 && in_game && t - last_trim >= i64::from(limits.trim_every_min) * 60 {
+            if last_trim != 0 {
+                acts.push(Act::Trim { pid: key.pid });
+            }
+            if let Some(w) = s.diag.watched.get_mut(key) {
+                w.limits.last_trim = t;
+            }
+        }
+    }
+    perform(acts);
 
     // Gone clients: classify and record.
     let gone: Vec<ProcKey> = keys.iter().copied().filter(|k| !alive.contains(k)).collect();
@@ -276,6 +394,9 @@ fn tick(app: &AppHandle) {
         let Some(mut w) = s.diag.watched.remove(&key) else { continue };
         if let Some(tail) = &mut w.tail {
             let _ = tail.read_new(&mut w.facts);
+        }
+        if let Some(id) = w.account {
+            seen_exited.push(id);
         }
         s.diag.closing.retain(|p| *p != key.pid);
         if let Some(b) = &w.browser_tracker_id {
@@ -312,9 +433,52 @@ fn tick(app: &AppHandle) {
     }
     if recorded > 0 {
         s.save();
-        drop(s);
+    }
+    drop(s);
+    if recorded > 0 {
         let _ = app.emit("crashes-changed", recorded);
     }
+    for id in seen_running {
+        let _ = app.emit("launch-status", crate::dto::LaunchEvent { account: id, state: "Running".into(), message: String::new() });
+        let _ = app.emit("account-updated", id);
+    }
+    for id in seen_exited {
+        let _ = app.emit("launch-status", crate::dto::LaunchEvent { account: id, state: "Exited".into(), message: String::new() });
+        let _ = app.emit("account-updated", id);
+    }
+}
+
+/// Minimizes (or restores) every running Roblox client. Returns how many
+/// windows were asked.
+#[tauri::command]
+pub fn clients_minimize_all(state: State<'_, Shared>, minimize: bool) -> Result<u32, String> {
+    let pids: Vec<u32> = {
+        let s = lock(&state)?;
+        s.procs.list_clients().map_err(|e| e.to_string())?.into_iter().map(|p| p.key.pid).collect()
+    };
+    let mut n = 0;
+    for pid in pids {
+        let r = if minimize { ram_win::client_ctl::minimize(pid) } else { ram_win::client_ctl::restore(pid) };
+        if matches!(r, Ok(true)) {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// Applies (kbps > 0) or removes (0) the bandwidth limit for Roblox
+/// clients. This is a Windows QoS policy, so Windows shows an
+/// administrator prompt; the policy lasts until it is removed here or the
+/// PC restarts.
+#[tauri::command(async)]
+pub fn apply_bandwidth(state: State<'_, Shared>, kbps: u32) -> Result<ram_core::model::LimitSettings, String> {
+    let kbps = if kbps == 0 { 0 } else { kbps.clamp(64, 1_000_000) };
+    ram_win::client_ctl::apply_bandwidth_limit((kbps > 0).then_some(kbps))?;
+    let mut s = lock(&state)?;
+    s.store.limits.bandwidth_kbps = kbps;
+    s.log.info(&format!("limits: bandwidth limit {}", if kbps > 0 { format!("set to {kbps} kbit/s") } else { "removed".into() }));
+    s.save();
+    Ok(s.store.limits.clone())
 }
 
 fn lock<'a>(state: &'a State<'_, Shared>) -> Result<std::sync::MutexGuard<'a, crate::state::AppState>, String> {

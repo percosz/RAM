@@ -110,3 +110,8 @@
 .menu-item .mi-arrow { width: 14px; height: 14px; color: var(--muted); margin-right: -4px; }
 .menu-item .mi-hint { font-size: 11.5px; color: var(--muted); }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
+/* Import: found files */
+.found { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); cursor: pointer; }
+.found:last-child { border-bottom: 0; }
+.found:hover { background: var(--hover); }

@@ -18,3 +18,8 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# The legacy password files use Argon2 with 128 MiB; unoptimised it takes
+# 13 s per derivation, so debug builds optimise just that crate.
+[profile.dev.package.argon2]
+opt-level = 3
