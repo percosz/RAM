@@ -312,11 +312,11 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
         )}
         <Btn icon onClick={() => saveSettings({ hide_usernames: !hide })} title={hide ? "Show usernames" : "Hide usernames"}>{hide ? <EyeOff /> : <Eye />}</Btn>
         <Btn onClick={() => check(selected.length ? selected : accounts.map((a) => a.id))} title="Check sign-in (selected, or all)"><RefreshCw />Check</Btn>
-        <Btn onClick={() => setDialog({ kind: "import" })}><Download />Import</Btn>
-        <Btn kind="primary" onClick={() => setDialog({ kind: "add" })}><Plus />Add</Btn>
+        <Btn data-tour="import" onClick={() => setDialog({ kind: "import" })}><Download />Import</Btn>
+        <Btn data-tour="add" kind="primary" onClick={() => setDialog({ kind: "add" })}><Plus />Add</Btn>
       </div>
 
-      <div className="list">
+      <div className="list" data-tour="list">
         {accounts.length === 0 ? (
           <div className="empty"><div><b>No accounts yet.</b><br />Add one, or import from Roblox Account Manager.</div></div>
         ) : visible.length === 0 ? (
@@ -366,7 +366,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
         })}
       </div>
 
-      <aside className="details">
+      <aside className="details" data-tour="details">
         {one ? (
           <Details a={one} onOpenBrowser={() => openBrowser(one.id)} onCheck={() => check([one.id])} onRemove={() => setDialog({ kind: "remove", ids: [one.id] })} />
         ) : (
@@ -374,7 +374,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
         )}
       </aside>
 
-      <div className="launchbar">
+      <div className="launchbar" data-tour="launch">
         <div className="lgroup">
           <input className="input place mono" placeholder="Place ID" value={placeId} onChange={(e) => setPlaceId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && join()} title="Place ID or game link" />
           <input className="input job mono" placeholder="Job ID (optional)" value={jobId} onChange={(e) => setJobId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && join()} />

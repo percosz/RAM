@@ -122,6 +122,8 @@ handler, which is what the "on this PC" notes refer to.
 |---|---|---|---|
 | Check GitHub Releases (`latest.json`) after start and every 6 h; offer in the sidebar | Conditional | — | `tauri-plugin-updater` with RAM's public key; no release existed yet when this was written, so the check path was exercised only as "could not fetch" (logged at WARN). |
 | Install on click (signed NSIS installer, passive mode, relaunch) | Conditional | — | Standard plugin flow; not exercised end to end. Portable copies are told to download instead. |
+| Update prompt at launch (Update now / Later) | Verified | No | A build labelled with an older version found the published release and opened the dialog by itself. The install step itself was not run from the prompt. |
+| First-launch tutorial, repeatable from the bottom of Settings | Verified | No | Every step screenshotted with demo data; the spotlight follows its target and the app underneath cannot be clicked while it is open. |
 | "What's new" once after an update | Verified | No | Notes come from the embedded CHANGELOG section for the running version. |
 
 ## Clients

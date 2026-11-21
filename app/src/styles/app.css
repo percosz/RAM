@@ -148,3 +148,25 @@
 .acct.moving { opacity: .45; }
 .acct.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .acct.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+
+/* Tutorial: a click-blocking layer, a spotlight ring whose shadow dims the
+   rest of the window, and a card beside it. */
+.tour { position: fixed; inset: 0; z-index: 200; }
+.tour.dim { background: rgba(6, 6, 12, .62); animation: fade .15s ease-out; }
+.tour-hole { position: fixed; border-radius: calc(var(--radius-sm) + 4px); box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 28%, transparent), 0 0 0 9999px rgba(6, 6, 12, .62); transition: left .22s ease, top .22s ease, width .22s ease, height .22s ease; pointer-events: none; }
+.tour-card { position: fixed; width: min(360px, calc(100vw - 24px)); background: var(--surface); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: var(--radius); box-shadow: 0 24px 60px rgba(0, 0, 0, .5); padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 10px; animation: pop .16s ease-out; }
+.tour-head { display: flex; align-items: center; gap: 12px; }
+.tour-icon { flex: none; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-wash); color: var(--accent); }
+.tour-icon svg { width: 20px; height: 20px; }
+.tour-count { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.tour-title { font-size: 16px; font-weight: 650; line-height: 1.25; }
+.tour-body { font-size: 13px; line-height: 1.5; color: var(--text); }
+.tour-body p { margin: 0 0 8px; }
+.tour-body p:last-child { margin-bottom: 0; }
+.tour-body ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+.tour-body code { font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12px; padding: 1px 5px; border-radius: 5px; background: var(--surface-2); }
+.tour-dots { display: flex; gap: 5px; padding-top: 2px; }
+.tour-dots i { width: 14px; height: 4px; border-radius: 2px; background: var(--border); transition: background .2s, width .2s; }
+.tour-dots i.done { background: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.tour-dots i.on { width: 24px; background: var(--accent); }
+.tour-foot { display: flex; align-items: center; gap: 8px; padding-top: 2px; }

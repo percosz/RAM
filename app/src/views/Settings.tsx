@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { GraduationCap } from "lucide-react";
 import { open as pickDialog } from "@tauri-apps/plugin-dialog";
 import { api, type BrowserChoice, type GraphicsSettings, type Msaa, type RenderMode, type Texture, type ThemeKind } from "../api";
 import { Btn, Field, Toggle } from "../components";
@@ -57,7 +58,7 @@ function presetOf(g: GraphicsSettings): "max" | "balanced" | "defaults" | "custo
   return same(PRESETS.max) ? "max" : same(PRESETS.balanced) ? "balanced" : "custom";
 }
 
-export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () => void; onShowUpdate: () => void }) {
+export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNeedUnlock: () => void; onShowUpdate: () => void; onShowTour: () => void }) {
   const { snap, settings, saveSettings, saveGraphics, saveLimits, refresh, toast, update, checkForUpdate } = useApp();
   const [browsers, setBrowsers] = useState<BrowserChoice[]>([]);
   const [bw, setBw] = useState("");
@@ -166,7 +167,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
             {mainName ? <> <b>{mainName}</b> is Main and is never touched.</> : <> Mark your own account as <b>Main</b> so it is never touched.</>}
           </div>
           <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-            <div className="seg">
+            <div className="seg" data-tour="perf">
               <button type="button" className={preset === "defaults" ? "active" : ""} onClick={() => saveGraphics(PRESETS.defaults)}>Roblox defaults (off)</button>
               <button type="button" className={preset === "balanced" ? "active" : ""} onClick={() => saveGraphics(PRESETS.balanced)}>Balanced (30 FPS)</button>
               <button type="button" className={preset === "max" ? "active" : ""} onClick={() => saveGraphics(PRESETS.max)}>Max alts (10 FPS, lowest)</button>
@@ -299,10 +300,20 @@ export function SettingsView({ onNeedUnlock, onShowUpdate }: { onNeedUnlock: () 
         <div className="card-h">Updates and about</div>
         <div className="card-b">
           <div>RAM {snap.version}{update && update.state !== "dismissed" ? <> — <a href="#" onClick={(e) => { e.preventDefault(); onShowUpdate(); }}>{update.version} is available</a></> : null}</div>
-          <Toggle checked={settings.check_updates} onChange={(c) => saveSettings({ check_updates: c })} label="Check for RAM updates" hint="Asks GitHub Releases after start and every 6 hours. A new version is offered in the sidebar, never installed without your click; its installer must carry RAM's release signature." />
+          <Toggle checked={settings.check_updates} onChange={(c) => saveSettings({ check_updates: c })} label="Check for RAM updates" hint="Asks GitHub Releases after start and every 6 hours. A new version is announced when RAM starts and stays in the sidebar; it is never installed without your click, and its installer must carry RAM's release signature." />
           <div className="row"><Btn sm onClick={async () => { setCheckMsg("Checking…"); setCheckMsg(await checkForUpdate(true)); }}>Check now</Btn><span className="hint">{checkMsg}</span></div>
           <div className="row"><Btn sm kind="ghost" onClick={() => api.openUrl(`https://github.com/${snap.github_repo}/releases`).catch(() => {})}>Release notes on GitHub</Btn></div>
           <div className="hint">A rewrite of <b>Roblox Account Manager</b> by ic3w0lf22 (GPL‑3.0). Cookie check and performance model from RoALT (MIT); embedded-browser ideas from alyae (GPL‑3.0); layout cues from niccs' RAM v4 (GPL‑3.0). Not affiliated with Roblox Corporation. See NOTICE.md.</div>
+        </div>
+      </section>
+
+      <section className="card wide">
+        <div className="card-h">Tutorial</div>
+        <div className="card-b">
+          <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+            <Btn onClick={onShowTour}><GraduationCap />Repeat the tutorial</Btn>
+            <span className="hint">A one-minute tour of what RAM can do and where to find it. It changes nothing.</span>
+          </div>
         </div>
       </section>
 

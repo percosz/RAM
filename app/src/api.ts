@@ -61,6 +61,8 @@ export interface Settings {
   check_updates: boolean;
   seen_version: string;
   hide_usernames: boolean;
+  /** The first-launch tutorial has been shown (finished or skipped). */
+  tour_seen: boolean;
   /** "" follows the Windows default browser; otherwise a browser's full path. */
   browser: string;
   window: unknown;

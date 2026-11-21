@@ -530,6 +530,8 @@ pub struct Settings {
     /// Show only the first three characters of each username (for
     /// screenshots and streams).
     pub hide_usernames: bool,
+    /// The first-launch tutorial has been shown (finished or skipped).
+    pub tour_seen: bool,
     /// Browser for Open Browser and sign-in: empty follows the Windows
     /// default; otherwise the full path of a Chromium-based browser.
     pub browser: String,
@@ -551,6 +553,7 @@ impl Default for Settings {
             check_updates: true,
             seen_version: String::new(),
             hide_usernames: false,
+            tour_seen: false,
             browser: String::new(),
             window: None,
             last_import_dir: String::new(),

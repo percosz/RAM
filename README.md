@@ -84,9 +84,12 @@ auto-updater verifies every update against RAM's own release signature.
   Frappé, Latte), Nord, Dracula, Gruvbox, Rosé Pine and a muted Lineage
   palette, an accent colour, corner radius, and four row sizes from Compact
   (one line) to Large.
-- **Updates.** RAM checks GitHub Releases quietly and offers a new version in
-  the sidebar; it installs only when you click, and the installer must carry
-  RAM's release signature. "What's new" shows once after an update.
+- **Tutorial.** A one-minute tour on first launch shows where everything is;
+  repeat it from the bottom of Settings.
+- **Updates.** RAM checks GitHub Releases, announces a new version when it
+  starts, and keeps the offer in the sidebar; it installs only when you
+  click, and the installer must carry RAM's release signature. "What's new"
+  shows once after an update.
 
 <details>
 <summary>More screenshots</summary>

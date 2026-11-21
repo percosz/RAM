@@ -4,6 +4,11 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.4.2 (2026-11-21)
+
+### New
+- **Tutorial.** The first time RAM starts, a one-minute tour points at each part of the app in turn: adding and importing accounts, the list, joining a game, an account's details, Clients, Diagnostics, performance settings and the vault. Skip it at any step. **Settings → Tutorial** (at the very bottom) repeats it. If you already use RAM, it shows once after this update.
+
 ## 0.4.1 (2026-11-21)
 
 ### New

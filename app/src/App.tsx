@@ -8,6 +8,7 @@ import { SettingsView } from "./views/Settings";
 import { ClientsView } from "./views/Clients";
 import { DiagnosticsView } from "./views/Diagnostics";
 import { UpdateDialog, WhatsNewDialog } from "./views/Updates";
+import { Tour } from "./views/Tour";
 import { VaultUnlockDialog } from "./dialogs";
 import "./styles/ui.css";
 import "./styles/app.css";
@@ -15,10 +16,24 @@ import "./styles/app.css";
 type View = "accounts" | "clients" | "diagnostics" | "settings";
 
 function Shell() {
-  const { snap, accounts, selected, setSelected, toasts, dismissToast, refresh, update, crashCount } = useApp();
+  const { snap, accounts, selected, setSelected, toasts, dismissToast, refresh, update, crashCount, saveSettings } = useApp();
   const [view, setView] = useState<View>("accounts");
   const [unlock, setUnlock] = useState(false);
   const [showUpdate, setShowUpdate] = useState(false);
+  // The tutorial: the step it opens at, or null while closed. It opens by
+  // itself the first time RAM runs and from the bottom of Settings.
+  const [tour, setTour] = useState<number | null>(null);
+  const tourOffered = useRef(false);
+  useEffect(() => {
+    if (!snap || tourOffered.current) return;
+    tourOffered.current = true;
+    if (!snap.settings.tour_seen) setTour((t) => t ?? 0);
+  }, [snap]);
+  const endTour = () => {
+    setTour(null);
+    setView("accounts");
+    if (snap && !snap.settings.tour_seen) void saveSettings({ tour_seen: true });
+  };
   const vault = snap?.vault;
   // A new version found at launch is announced once: Update now or Later.
   // One found hours into a session only lights the sidebar pill, so a
@@ -27,10 +42,12 @@ function Shell() {
   const announced = useRef(false);
   useEffect(() => {
     if (announced.current || !update || update.state !== "available") return;
-    if (Date.now() - born.current > 120_000) return;
+    // The tutorial goes first; the offer follows when it closes.
+    if (tour !== null) return;
+    if (Date.now() - born.current > 300_000) return;
     announced.current = true;
     setShowUpdate(true);
-  }, [update]);
+  }, [update, tour]);
   // The webview's own right-click menu (Back, Refresh, Print) has no place
   // in an app; text fields keep theirs for copy and paste.
   useEffect(() => {
@@ -46,7 +63,9 @@ function Shell() {
     api.startHint().then(([v, first, dialog]) => {
       if (v === "clients" || v === "settings" || v === "accounts" || v === "diagnostics") setView(v);
       if (first && snap.accounts.length) setSelected([snap.accounts[0]!.id]);
-      if (dialog) window.dispatchEvent(new CustomEvent("ram-start-dialog", { detail: dialog }));
+      if (dialog.startsWith("tour")) setTour(Number(dialog.split(":")[1] ?? 0) || 0);
+      else if (dialog === "bottom") window.setTimeout(() => document.querySelector(".settings")?.scrollTo(0, 1e6), 400);
+      else if (dialog) window.dispatchEvent(new CustomEvent("ram-start-dialog", { detail: dialog }));
     }).catch(() => {});
   }, [snap, hinted, setSelected]);
   const valid = accounts.filter((a) => a.sign_in.state === "Verified").length;
@@ -57,6 +76,7 @@ function Shell() {
 
   const vaultPill = vault && (
     <div
+      data-tour="vault"
       className={`vault-pill ${!vault.configured ? "" : vault.unlocked ? "unlocked" : "locked"}`}
       onClick={() => (vault.configured && !vault.unlocked ? setUnlock(true) : setView("settings"))}
       title={vault.configured ? (vault.unlocked ? "Vault unlocked" : "Vault locked — click to unlock") : "No cookie vault yet"}
@@ -82,7 +102,7 @@ function Shell() {
           <b>RAM</b>
         </div>
         {tabs.map(([id, name, icon]) => (
-          <button key={id} className={`nav ${view === id ? "active" : ""}`} onClick={() => setView(id)}>
+          <button key={id} data-tour={`nav-${id}`} className={`nav ${view === id ? "active" : ""}`} onClick={() => setView(id)}>
             {icon} {name}{id === "diagnostics" && crashCount > 0 && <span className="pip" title={`${crashCount} new crash record${crashCount === 1 ? "" : "s"}`} />}
           </button>
         ))}
@@ -99,7 +119,7 @@ function Shell() {
         {view === "accounts" && <AccountsView onNeedUnlock={() => setUnlock(true)} />}
         {view === "clients" && <ClientsView />}
         {view === "diagnostics" && <DiagnosticsView />}
-        {view === "settings" && <SettingsView onNeedUnlock={() => setUnlock(true)} onShowUpdate={() => setShowUpdate(true)} />}
+        {view === "settings" && <SettingsView onNeedUnlock={() => setUnlock(true)} onShowUpdate={() => setShowUpdate(true)} onShowTour={() => setTour(0)} />}
       </main>
       <footer className="statusbar">
         <span><b className="accent">{selected.length}</b> selected</span>
@@ -116,8 +136,9 @@ function Shell() {
       </footer>
       <Toasts items={toasts} dismiss={dismissToast} />
       {unlock && <VaultUnlockDialog onClose={() => { setUnlock(false); void refresh(); }} />}
-      {showUpdate && update && <UpdateDialog onClose={() => setShowUpdate(false)} />}
-      {whatsNew && !showUpdate && <WhatsNewDialog />}
+      {showUpdate && update && tour === null && <UpdateDialog onClose={() => setShowUpdate(false)} />}
+      {whatsNew && !showUpdate && tour === null && <WhatsNewDialog />}
+      {tour !== null && <Tour key={tour} start={tour} setView={setView} onDone={endTour} />}
     </div>
   );
 }
