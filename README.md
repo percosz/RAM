@@ -1,6 +1,6 @@
 # RAM
 
-A fast, clean Windows account manager for Roblox, built for everyday Rogue
+A  very very very fast, clean Windows account manager for Roblox, built for everyday Rogue
 Lineage use: switch between many accounts, join a place or follow a friend
 with one click, keep every session cookie in an encrypted vault, open your
 own browser already signed in as any account, run several clients at once,
