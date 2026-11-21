@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-  Builds the release binary and a reproducible zip package.
+  Builds RAM (Tauri shell + Rust core) and a reproducible zip package.
 
 .DESCRIPTION
-  Runs the tests, builds RAM.exe with the pinned toolchain and locked
-  dependencies, and writes dist\RAM-<version>-x64.zip plus its SHA-256.
+  Runs the Rust tests, builds the React front-end with Vite, builds RAM.exe
+  in release mode with the pinned toolchain and locked dependencies, and
+  writes dist\RAM-<version>-x64.zip plus its SHA-256.
 
   The zip is reproducible: entries are stored in a fixed order with a fixed
-  timestamp, and the build remaps local paths, so two builds of the same
-  commit on different machines produce the same bytes.
+  timestamp, the build remaps local paths, and the linker runs with /Brepro.
+  The front-end bundle is deterministic for the same package-lock.json.
 
 .PARAMETER TargetDir
   Cargo target directory. Defaults to a short path because the MSVC linker
@@ -27,22 +28,28 @@ Set-Location $root
 
 $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 if (Test-Path $cargoBin) { $env:PATH = "$cargoBin;$env:PATH" }
+if (Test-Path "C:\Program Files\nodejs") { $env:PATH = "C:\Program Files\nodejs;$env:PATH" }
 $env:CARGO_TARGET_DIR = $TargetDir
 # Strip machine-specific paths from the binary and make the linker output
 # deterministic (/Brepro replaces the PE timestamp with a content hash).
 $env:RUSTFLAGS = "--remap-path-prefix=$root=. --remap-path-prefix=$TargetDir=target --remap-path-prefix=$($env:USERPROFILE)=~ -C link-arg=/Brepro"
 
-# Cargo writes progress (and its "Finished" line) to stderr, which the Stop
-# preference would treat as a terminating error; run these with Continue and
-# rely on the exit code instead.
+# Cargo and npm write progress to stderr, which the Stop preference would
+# treat as a terminating error; run them with Continue and check exit codes.
 if (-not $SkipTests) {
     & { $ErrorActionPreference = 'Continue'; cargo test --workspace --locked }
     if ($LASTEXITCODE -ne 0) { throw "tests failed" }
 }
-& { $ErrorActionPreference = 'Continue'; cargo build --release --locked -p ram-app }
+Push-Location (Join-Path $root "app")
+& { $ErrorActionPreference = 'Continue'; npm ci --no-fund --no-audit }
+if ($LASTEXITCODE -ne 0) { Pop-Location; throw "npm ci failed" }
+& { $ErrorActionPreference = 'Continue'; npm run build }
+if ($LASTEXITCODE -ne 0) { Pop-Location; throw "front-end build failed" }
+Pop-Location
+& { $ErrorActionPreference = 'Continue'; cargo build --release --locked -p ram-tauri }
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
-$version = (Select-String -Path (Join-Path $root "Cargo.toml") -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+$version = (Select-String -Path (Join-Path $root "app\src-tauri\Cargo.toml") -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 $name = "RAM-$version-x64"
 $dist = Join-Path $root "dist"
 $stage = Join-Path $dist $name

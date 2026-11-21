@@ -1,0 +1,34 @@
+[package]
+name = "ram-tauri"
+version = "0.2.0"
+edition.workspace = true
+license.workspace = true
+description = "RAM: a Roblox account manager (Tauri shell)."
+
+[lib]
+name = "ram_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "RAM"
+path = "src/main.rs"
+
+[features]
+# Tauri serves the embedded front-end only with `custom-protocol`; without it
+# the app expects the Vite dev server. Default on, so a plain `cargo build`
+# produces a working RAM.exe. For hot reload: `tauri dev --no-default-features`.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+serde.workspace = true
+serde_json.workspace = true
+ram-core = { path = "../../crates/ram-core" }
+ram-win = { path = "../../crates/ram-win" }

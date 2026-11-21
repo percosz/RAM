@@ -148,6 +148,15 @@ pub struct Account {
     pub last_used: Option<i64>,
     /// Where this entry came from, for repeat-safe imports.
     pub import_key: Option<String>,
+    /// Display name reported by Roblox at the last cookie check.
+    #[serde(default)]
+    pub display_name: String,
+    /// Robux balance at the last cookie check, when fetched.
+    #[serde(default)]
+    pub robux: Option<i64>,
+    /// Premium membership at the last cookie check, when fetched.
+    #[serde(default)]
+    pub premium: Option<bool>,
 }
 
 impl Default for Account {
@@ -168,6 +177,9 @@ impl Default for Account {
             created: 0,
             last_used: None,
             import_key: None,
+            display_name: String::new(),
+            robux: None,
+            premium: None,
         }
     }
 }

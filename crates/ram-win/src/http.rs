@@ -22,7 +22,10 @@ use crate::util::{code_of, from_wide, wide};
 /// Largest response body accepted.
 pub const MAX_BODY: usize = 1024 * 1024;
 
-const USER_AGENT: &str = "RAM";
+/// Roblox's web endpoints expect a browser user agent (RoALT uses the same
+/// approach); the cookie is what identifies the account.
+const USER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36";
 
 /// Owns a WinHTTP handle.
 struct Internet(*mut c_void);

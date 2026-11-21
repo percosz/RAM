@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/ram-core", "crates/ram-win", "crates/ram-app"]
+members = ["crates/ram-core", "crates/ram-win", "app/src-tauri"]
+exclude = ["crates/ram-app"]
 
 [workspace.package]
 version = "0.1.0"

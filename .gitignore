@@ -337,3 +337,10 @@ __pycache__/
 /upstream-src/
 /dist/
 
+
+# tauri/vite
+/app/node_modules/
+/app/dist/
+/app/src-tauri/gen/
+/app/src-tauri/target/
+

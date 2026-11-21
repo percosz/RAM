@@ -18,6 +18,41 @@ claims about Roblox, browsers and Windows is in
 Because the two revisions differ by one line in a removed feature, 3.7.2 is
 the migration target: the importer reads what 3.7.2 writes.
 
+## Update 2: Tauri shell, simpler launching, browser sessions (v0.2)
+
+The native Win32 shell (`crates/ram-app`, kept for reference, no longer built)
+is replaced by a **Tauri 2 + React/TypeScript** application in `app/`. The
+Rust core is unchanged in role: `ram-core` holds the vault, importer/exporter,
+ticket flow and status rules; `ram-win` the Windows layer; the Tauri crate only
+adds state and commands. This was a deliberate trade: a webview front-end gives
+the look of RoALT and niccs' v4 that native controls could not, at the cost of
+the WebView2 dependency (present on Windows 10/11) and a larger binary.
+
+Alongside the shell change, three behaviours changed after reading RoALT,
+alyae and niccs closely (`REFERENCE_CODE_STUDY.md`):
+
+- **Launching is Place ID / Job ID / Follow again.** The named-destination
+  system and its view are gone. The launch bar is the classic one: a place id
+  (Rogue Lineage pre-filled), an optional job id, and a username to follow
+  (resolved with `POST users.roblox.com/v1/usernames/users`, then
+  `RequestFollowUser`). Saved destinations in old data files are ignored.
+- **The login check is RoALT's**, replacing the OAuth 2.0 option. `GET
+  users.roblox.com/v1/users/authenticated` with the cookie and a browser user
+  agent: 200 is valid; 401 invalid; 401 with Roblox error 9002/2 "bound
+  session required"; 403 with `rblx-challenge-id` a verification challenge;
+  429 and transport errors leave the stored state untouched. A `.ROBLOSECURITY`
+  in `Set-Cookie` replaces the stored cookie. Robux and Premium are fetched
+  alongside. The OAuth module remains in `ram-core` but is unused.
+- **"Open Browser" is an embedded, signed-in browser window** (alyae's
+  model): a Tauri webview window per account with its own WebView2 profile
+  folder, the cookie injected before navigation (domain written as
+  `..roblox.com` because the cookie crate strips one leading dot), navigation
+  limited to Roblox and CAPTCHA hosts, and the profile's browsing data cleared
+  on close so the vault remains the only cookie store (RoALT's rule). The same
+  window captures the cookie after a manual sign-in, which is how an account
+  is added without pasting anything. The earlier "bind an account to a Chrome
+  profile" option is gone.
+
 ## Update: the cookie vault and direct launch
 
 An earlier revision of this document described a design that stored **no**

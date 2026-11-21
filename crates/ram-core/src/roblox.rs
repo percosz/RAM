@@ -25,6 +25,12 @@ pub enum LaunchError {
     /// Roblox rejected the cookie (401, or an authenticated endpoint 403 that
     /// is not a CSRF challenge): the session is invalid.
     Unauthorized,
+    /// 401 with Roblox error 9002/2: the session must be re-bound by signing
+    /// in again in a browser (RoALT's `BoundSessionRequired`).
+    BoundSessionRequired,
+    /// 403 carrying `rblx-challenge-id`: Roblox wants a verification step
+    /// completed in a browser before the cookie works again.
+    Challenge,
     /// Roblox returned an error that says nothing about the cookie.
     Service { status: u16 },
     /// The response was not in the documented shape.
@@ -40,7 +46,10 @@ impl LaunchError {
             LaunchError::RateLimited { retry_after_secs } => {
                 CheckOutcome::RateLimited { retry_after_secs: *retry_after_secs }
             }
-            LaunchError::Unauthorized => CheckOutcome::AuthorizationRejected,
+            LaunchError::Unauthorized | LaunchError::BoundSessionRequired => CheckOutcome::AuthorizationRejected,
+            LaunchError::Challenge => CheckOutcome::VerificationRequired {
+                reason: "Roblox asked for a verification step. Open the browser for this account and complete it.".into(),
+            },
             LaunchError::Service { status } => CheckOutcome::ServiceError { status: *status },
             LaunchError::Malformed => CheckOutcome::ServiceError { status: 0 },
         }
@@ -80,23 +89,67 @@ fn cookie_header(cookie: &str) -> String {
 /// 429 is [`LaunchError::RateLimited`]; other non-success statuses are
 /// [`LaunchError::Service`].
 pub fn whoami(http: &dyn HttpApi, cookie: &str) -> Result<AuthedUser, LaunchError> {
+    whoami_full(http, cookie).map(|w| w.user)
+}
+
+/// The login check's full result: the identity, plus a rotated cookie when
+/// Roblox answered with a new `.ROBLOSECURITY` (the caller should store it).
+#[derive(Clone, PartialEq, Eq)]
+pub struct WhoAmI {
+    pub user: AuthedUser,
+    pub rotated_cookie: Option<String>,
+}
+
+impl std::fmt::Debug for WhoAmI {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WhoAmI").field("user", &self.user).field("rotated", &self.rotated_cookie.is_some()).finish()
+    }
+}
+
+/// Classification follows RoALT: 200 is valid; 401 is invalid, or
+/// "bound session required" when the body carries error 9002/2; 403 with
+/// `rblx-challenge-id` is a verification challenge; 429 and transport
+/// failures say nothing about the cookie.
+pub fn whoami_full(http: &dyn HttpApi, cookie: &str) -> Result<WhoAmI, LaunchError> {
     let cookie = cookie_header(cookie);
     let resp = http
         .request(
             "GET",
             "https://users.roblox.com/v1/users/authenticated",
-            &[("Cookie", cookie.as_str())],
+            &[("Cookie", cookie.as_str()), ("Accept", "application/json, text/plain, */*")],
             None,
             TIMEOUT_MS,
         )
         .map_err(net_error)?;
 
     match resp.status {
-        200 => parse_authed_user(&resp.body),
+        200 => Ok(WhoAmI { user: parse_authed_user(&resp.body)?, rotated_cookie: rotated_cookie(&resp) }),
+        401 if error_code(&resp.body) == Some((9002, 2)) => Err(LaunchError::BoundSessionRequired),
         401 => Err(LaunchError::Unauthorized),
+        403 if resp.header("rblx-challenge-id").is_some() => Err(LaunchError::Challenge),
         429 => Err(LaunchError::RateLimited { retry_after_secs: resp.retry_after }),
         status => Err(LaunchError::Service { status }),
     }
+}
+
+/// Roblox's `{"errors":[{"code":n,"subcode"?:m}]}` body, when present.
+fn error_code(body: &[u8]) -> Option<(i64, i64)> {
+    let v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let e = v.get("errors")?.as_array()?.first()?;
+    let code = e.get("code")?.as_i64()?;
+    let sub = e.get("subcode").and_then(|s| s.as_i64()).unwrap_or(0);
+    Some((code, sub))
+}
+
+/// A `.ROBLOSECURITY` value from any `Set-Cookie` header on the response,
+/// ignoring deletions.
+fn rotated_cookie(resp: &crate::platform::HttpResponse) -> Option<String> {
+    resp.headers
+        .iter()
+        .filter(|(k, _)| k == "set-cookie")
+        .filter_map(|(_, v)| v.strip_prefix(".ROBLOSECURITY="))
+        .map(|rest| rest.split(';').next().unwrap_or("").trim().to_string())
+        .find(|value| value.len() > 32)
 }
 
 /// Parses the `authenticated` body into an [`AuthedUser`], or

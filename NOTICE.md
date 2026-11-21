@@ -24,17 +24,20 @@ value), taken from the upstream source.
 The upstream README is preserved at
 [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md).
 
-## Projects consulted for workflow ideas
+## Projects whose designs RAM follows
 
-No code was copied from these projects. They were read to understand how
-people use multi-account tools.
+These projects were read closely and several of their approaches are
+reimplemented here (no files were copied verbatim; the specific techniques
+are credited below). Their licences are compatible with GPL-3.0.
 
-| Project | Licence |
-|---|---|
-| [inspectsoftware/RoALT](https://github.com/inspectsoftware/RoALT) | MIT |
-| [ericky0/rbx-account-manager](https://github.com/ericky0/rbx-account-manager) | GPL-3.0 |
-| [niccsprojects/Roblox-Account-Manager](https://github.com/niccsprojects/Roblox-Account-Manager) | GPL-3.0 |
-| [vysaely/alyae](https://github.com/vysaely/alyae) | GPL-3.0 |
+| Project | Licence | What RAM takes from it |
+|---|---|---|
+| [inspectsoftware/RoALT](https://github.com/inspectsoftware/RoALT) | MIT | The login check: `GET users.roblox.com/v1/users/authenticated` with the cookie, treating 401 as invalid, 401 + Roblox error 9002/2 as "bound session required", 403 + `rblx-challenge-id` as a challenge, 429 and transport errors as inconclusive; cookie rotation from `Set-Cookie`; a browser user agent; a per-account browser profile whose session is cleared so the vault stays the only store; the token-based theme system with named presets and accent. |
+| [vysaely/alyae](https://github.com/vysaely/alyae) | GPL-3.0 | The embedded "Open Browser" window with the session cookie injected (and the `..roblox.com` domain workaround for the cookie crate), navigation limited to Roblox hosts, reading the session back after a manual sign-in; the simple Place ID / Job ID / Follow launch deck. |
+| [niccsprojects/Roblox-Account-Manager](https://github.com/niccsprojects/Roblox-Account-Manager) (v4) | GPL-3.0 | Layout cues for the account list, details pane and status legend; username-to-id lookup for Follow. |
+| [ericky0/rbx-account-manager](https://github.com/ericky0/rbx-account-manager) | GPL-3.0 | Workflow reference only. |
+
+RoALT's name, logo and distinctive look are not reused; RAM has its own.
 
 ## Third-party components in the binary
 
@@ -45,9 +48,13 @@ people use multi-account tools.
 | [argon2](https://crates.io/crates/argon2) | MIT OR Apache-2.0 | Master-password key derivation (vault) |
 | [aes-gcm](https://crates.io/crates/aes-gcm) | Apache-2.0 OR MIT | Cookie encryption (vault) |
 | [zeroize](https://crates.io/crates/zeroize), [rand](https://crates.io/crates/rand) | MIT OR Apache-2.0 | Key hygiene and randomness |
-| [winresource](https://crates.io/crates/winresource) | MIT | Build-time only: icon, version info and manifest |
+| [tauri](https://crates.io/crates/tauri) and its plugins (opener, dialog, clipboard-manager) | MIT OR Apache-2.0 | Application shell and WebView2 host |
+| [React](https://react.dev) | MIT | Front-end |
+| [Vite](https://vitejs.dev), [TypeScript](https://www.typescriptlang.org) | MIT, Apache-2.0 | Build-time only |
+| [lucide-react](https://lucide.dev) | ISC | Icons |
+| Colour palettes: [Catppuccin](https://github.com/catppuccin/catppuccin), [Nord](https://www.nordtheme.com), [Dracula](https://draculatheme.com), [Gruvbox](https://github.com/morhetz/gruvbox), [Rosé Pine](https://rosepinetheme.com) | MIT | Theme presets |
 
-The exact versions are pinned in `Cargo.lock`.
+The exact versions are pinned in `Cargo.lock` and `app/package-lock.json`.
 
 ## Trademarks and affiliation
 

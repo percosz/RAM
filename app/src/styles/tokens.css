@@ -1,0 +1,40 @@
+/* Design tokens. Each theme sets the same variables on :root[data-theme].
+   Palettes: Catppuccin (MIT), Nord (MIT), Dracula (MIT), Gruvbox (MIT),
+   Rosé Pine (MIT); see NOTICE.md. */
+:root {
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --radius: 10px;
+  --radius-sm: 7px;
+  --radius-xs: 5px;
+  --row-h: 40px;
+  --density: 1;
+  /* default: Catppuccin Mocha */
+  --bg: #1e1e2e; --surface: #24243a; --surface-2: #313244; --text: #cdd6f4; --muted: #a6adc8;
+  --border: #45475a; --accent: #cba6f7; --accent-text: #1e1e2e;
+  --good: #a6e3a1; --warn: #f9e2af; --bad: #f38ba8; --scheme: dark;
+}
+:root[data-theme="light"] { --bg: #f5f5f4; --surface: #ffffff; --surface-2: #ebebea; --text: #1c1c1c; --muted: #5f6368; --border: #d4d4d2; --accent: #2f6fb5; --accent-text: #ffffff; --good: #1e7b3c; --warn: #8a5a00; --bad: #b3261e; --scheme: light; }
+:root[data-theme="dark"] { --bg: #1e1f22; --surface: #26282c; --surface-2: #303338; --text: #e6e6e6; --muted: #9da2a8; --border: #3c3f45; --accent: #5b9be0; --accent-text: #101214; --good: #6cc58a; --warn: #e0b05a; --bad: #f08a80; --scheme: dark; }
+:root[data-theme="mocha"] { --bg: #1e1e2e; --surface: #24243a; --surface-2: #313244; --text: #cdd6f4; --muted: #a6adc8; --border: #45475a; --accent: #cba6f7; --accent-text: #1e1e2e; --good: #a6e3a1; --warn: #f9e2af; --bad: #f38ba8; --scheme: dark; }
+:root[data-theme="macchiato"] { --bg: #24273a; --surface: #2a2d43; --surface-2: #363a4f; --text: #cad3f5; --muted: #a5adcb; --border: #494d64; --accent: #c6a0f6; --accent-text: #24273a; --good: #a6da95; --warn: #eed49f; --bad: #ed8796; --scheme: dark; }
+:root[data-theme="frappe"] { --bg: #303446; --surface: #363a4c; --surface-2: #414559; --text: #c6d0f5; --muted: #a5adce; --border: #51576d; --accent: #ca9ee6; --accent-text: #303446; --good: #a6d189; --warn: #e5c890; --bad: #e78284; --scheme: dark; }
+:root[data-theme="latte"] { --bg: #eff1f5; --surface: #ffffff; --surface-2: #e6e9ef; --text: #4c4f69; --muted: #6c6f85; --border: #ccd0da; --accent: #8839ef; --accent-text: #ffffff; --good: #40a02b; --warn: #df8e1d; --bad: #d20f39; --scheme: light; }
+:root[data-theme="nord"] { --bg: #2e3440; --surface: #343b4a; --surface-2: #3b4252; --text: #eceff4; --muted: #a6b0c0; --border: #434c5e; --accent: #88c0d0; --accent-text: #2e3440; --good: #a3be8c; --warn: #ebcb8b; --bad: #bf616a; --scheme: dark; }
+:root[data-theme="dracula"] { --bg: #282a36; --surface: #2e303e; --surface-2: #343746; --text: #f8f8f2; --muted: #9aa2c4; --border: #44475a; --accent: #bd93f9; --accent-text: #282a36; --good: #50fa7b; --warn: #f1fa8c; --bad: #ff5555; --scheme: dark; }
+:root[data-theme="gruvbox"] { --bg: #282828; --surface: #32302f; --surface-2: #3c3836; --text: #ebdbb2; --muted: #a89984; --border: #504945; --accent: #fe8019; --accent-text: #282828; --good: #b8bb26; --warn: #fabd2f; --bad: #fb4934; --scheme: dark; }
+:root[data-theme="rosepine"] { --bg: #191724; --surface: #1f1d2e; --surface-2: #26233a; --text: #e0def4; --muted: #908caa; --border: #403d52; --accent: #eb6f92; --accent-text: #191724; --good: #9ccfd8; --warn: #f6c177; --bad: #eb6f92; --scheme: dark; }
+:root[data-theme="lineage"] { --bg: #1b1d1a; --surface: #232621; --surface-2: #2c3029; --text: #dcd6c4; --muted: #9a9684; --border: #3a3d34; --accent: #8fa37a; --accent-text: #14160f; --good: #8fbf7a; --warn: #d0a45c; --bad: #d98a7a; --scheme: dark; }
+
+:root[data-density="compact"] { --row-h: 32px; --radius: 8px; --radius-sm: 6px; }
+
+/* Derived */
+:root {
+  --accent-wash: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  --accent-wash-2: color-mix(in srgb, var(--accent) 30%, var(--surface));
+  --hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --good-wash: color-mix(in srgb, var(--good) 18%, transparent);
+  --warn-wash: color-mix(in srgb, var(--warn) 18%, transparent);
+  --bad-wash: color-mix(in srgb, var(--bad) 18%, transparent);
+  color-scheme: var(--scheme);
+}

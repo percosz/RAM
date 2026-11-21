@@ -1,41 +1,74 @@
 # Building RAM
 
+RAM is a Rust workspace (the core and the Windows layer) plus a Tauri 2
+application whose front-end is React + TypeScript built with Vite.
+
 ## Requirements
 
-- Windows 10 version 1809 or later, x64.
+- Windows 10 version 1809 or later, x64, with the **WebView2 runtime** (part
+  of Windows 11 and current Windows 10; also installed by Microsoft Edge).
 - Rust, the version pinned in `rust-toolchain.toml` (rustup installs it
   automatically), with the `x86_64-pc-windows-msvc` target.
 - Visual Studio 2022 Build Tools with the "Desktop development with C++"
-  workload (MSVC linker and Windows SDK).
+  workload (MSVC linker and Windows SDK, which provides `rc.exe`).
+- Node.js 20 or later with npm.
 
 ```powershell
 winget install Rustlang.Rustup
 ```
 
 ```powershell
+winget install OpenJS.NodeJS.LTS
+```
+
+```powershell
 winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-## Build and run
+## One-shot package
 
-The MSVC linker fails when the build directory path is very long. If the
-repository is in a deep folder, point Cargo at a short target directory
-first:
+```powershell
+.\scripts\package.ps1
+```
+
+Runs the Rust tests, `npm ci` + `npm run build` for the front-end, builds
+`RAM.exe` in release mode with `--locked`, and writes
+`dist\RAM-<version>-x64.zip` with its `.sha256`. The script remaps local paths
+out of the binary, links with `/Brepro`, and writes zip entries in a fixed
+order with a fixed timestamp, so the same commit with the same toolchain
+produces the same hashes on every machine. Pass `-SkipTests` to skip the test
+run.
+
+## Step by step
+
+The MSVC linker fails on very long paths; point Cargo at a short target
+directory if the checkout is deep:
 
 ```powershell
 $env:CARGO_TARGET_DIR = "$env:USERPROFILE\wpt"
 ```
 
 ```powershell
-cargo build --release -p ram-app
+cd app; npm ci; npm run build; cd ..
 ```
 
 ```powershell
-& "$env:CARGO_TARGET_DIR\release\RAM.exe"
+cargo build --release -p ram-tauri
 ```
 
-The program is a single executable. It needs no installer, no runtime, no
-administrator rights and no background service.
+The result is `$env:CARGO_TARGET_DIR\release\RAM.exe`, a single executable
+with the front-end embedded. Debug builds embed it too (the `custom-protocol`
+feature is on by default), so `cargo build -p ram-tauri` always yields a
+working app after `npm run build`.
+
+## Development loop
+
+```powershell
+cd app; npm run tauri dev -- --no-default-features
+```
+
+Starts Vite with hot reload and a debug app pointed at it (turning the
+default feature off is what makes the app load from the dev server).
 
 ## Tests
 
@@ -43,53 +76,27 @@ administrator rights and no background service.
 cargo test --workspace
 ```
 
-- `ram-core` tests are pure and run anywhere.
-- `ram-win` tests start short-lived child processes (`ping`, a PowerShell
-  loop) to exercise priority, efficiency mode, Job Object limits and exit
-  notifications. Four tests are ignored by default because they need the
-  network or show a window; run them with:
-
-```powershell
-cargo test -p ram-win -- --ignored
-```
-
-## Reproducible package
-
-```powershell
-.\scripts\package.ps1
-```
-
-This runs the tests, builds with `--locked`, and writes
-`dist\RAM-<version>-x64.zip` and its `.sha256`. The script remaps local
-paths out of the binary and writes zip entries in a fixed order with a fixed
-timestamp. With the same commit, the pinned toolchain and the same Windows
-SDK version, the executable and zip hashes are the same on every run; the
-script prints both so two builds can be compared.
-
-## Command-line options
-
-| Option | Purpose |
-|---|---|
-| `--data-dir <folder>` | Use this folder instead of `%LOCALAPPDATA%\RAM`. Allows a second instance. |
-| `--seed-demo <n>` | Fill the store with `n` demo accounts (for UI checks and benchmarks). |
-| `--bench-startup` | Write the time to the first painted frame to `bench-startup.txt` in the data folder, then exit. |
-| `--bench-ui` | Measure search, selection and repaint times, write `bench-ui.txt`, then exit. |
-
-## Benchmarks
-
-```powershell
-.\scripts\bench.ps1 -Exe dist\RAM-0.1.0-x64\RAM.exe -Arguments '--data-dir','C:\tmp\wp-bench','--seed-demo','100' -PackagePath dist\RAM-0.1.0-x64.zip
-```
-
-The same script measures any other GUI executable, which is how the legacy
-app is compared on the same PC. See [BENCHMARKS.md](BENCHMARKS.md).
+- `ram-core` tests are pure Rust (vault, importer/exporter, ticket flow,
+  login-check classification, status rules).
+- `ram-win` tests spawn short-lived child processes to exercise the Windows
+  layer. Four tests are `#[ignore]` (network, interactive UI); run them with
+  `cargo test -p ram-win -- --ignored`.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `crates/ram-core` | Model, store, importer, link validation, sign-in rules, client tracking, performance policy, redaction. No Windows dependency. |
-| `crates/ram-win` | Windows implementations of the platform traits. |
-| `crates/ram-app` | The Win32 application. |
+| `crates/ram-core` | Model, store, vault, importer/exporter, Roblox API flows, status rules. No Windows dependency. |
+| `crates/ram-win` | Windows implementations: processes, jobs, windows, Hello, DPAPI, WinHTTP, multi-instance, protocol launch. |
+| `app/src-tauri` | The Tauri shell: state, commands, the per-account browser window. Builds `RAM.exe`. |
+| `app/src` | React front-end: views, dialogs, themes. |
+| `crates/ram-app` | The earlier native Win32 shell, kept for reference; not built. |
 | `scripts/` | Packaging and benchmark scripts. |
-| `docs/` | Audit, research notes, decisions, migration, support matrix, benchmarks. |
+| `docs/` | Audit, research, decisions, migration, support matrix, benchmarks. |
+
+## Data
+
+`%LOCALAPPDATA%\RAM\` holds `store.json` (accounts and settings, with
+`store.json.bak`), `vault.bin` (encrypted cookies), `profiles\<id>\` (each
+account's browser profile; its session is cleared when the window closes) and
+`RAM.log` (redacted). `RAM_DATA_DIR` overrides the folder.
