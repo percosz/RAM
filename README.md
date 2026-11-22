@@ -36,8 +36,9 @@ auto-updater verifies every update against RAM's own release signature.
   badge, Robux and Premium. Tick boxes on rows and group headers pick any set
   of accounts; the details pane edits alias, group and description, marks
   Main and favourites, and shows how the account was added (cookie only,
-  browser sign-in, or login + password). Drag rows to reorder, and hide
-  usernames with one click for screenshots.
+  browser sign-in, or login + password). Drag rows to reorder. One click on
+  the eye button hides names, aliases, avatars, Robux and user IDs for
+  screenshots and streams.
 - **Add accounts your way.** Sign in with Roblox in your own browser, paste a
   cookie, or paste a list. Cookies in the list are added at once;
   `username:password` lines go into a queue: RAM opens Roblox's own sign-in
@@ -91,26 +92,36 @@ auto-updater verifies every update against RAM's own release signature.
 - **Diagnostics.** A crash history that says how each client ended
   (disconnected, crashed, replaced, sign-in refused) with the reason from its
   log, CSV export and a link to the log. A client you close yourself is not
-  recorded, including one ended with End task. RAM's own log has level
-  filters and a redacted "Copy diagnostics".
+  recorded, including one ended with End task, and neither is a client that
+  does not belong to an account in RAM. RAM's own log has level filters and
+  a redacted "Copy diagnostics".
 - **Import / export.** RAM searches your PC for Roblox Account Manager's
   `AccountData.json` and its backups (`.backup`, `.bak`, `.old`), unlocks the
   file if it has a password, shows a preview, and moves its cookies and saved
   passwords into the vault; export back out with or without cookies.
-- **Themes and rows.** System, Light, Dark, Catppuccin (Mocha, Macchiato,
-  Frappé, Latte), Nord, Dracula, Gruvbox, Rosé Pine and a muted Lineage
-  palette, an accent colour, corner radius, and four row sizes from Compact
-  (one line) to Large.
+- **Themes and rows.** Nineteen themes: System, Light, Dark, Catppuccin
+  (Mocha, Macchiato, Frappé, Latte), Nord, Dracula, Gruvbox, Rosé Pine,
+  Tokyo Night, Midnight (pure black), a muted Lineage palette, and five that
+  restyle the whole app: Windows XP, Windows Vista (Aero glass), Classic
+  (95), Aurora (glass) and Synthwave. Plus an accent colour, corner radius,
+  and four row sizes from Compact (one line) to Large.
 - **Tutorial.** A one-minute tour on first launch points at each part of the
   app in turn; skip it at any step and repeat it from the bottom of Settings.
 - **Updates.** RAM checks GitHub Releases when it starts and every 6 hours.
   A new version is announced in a dialog with its release notes and two
   choices, **Update now** or **Later**; Later keeps the offer in the sidebar.
   Nothing installs without your click, and the installer must carry RAM's
-  release signature. "What's new" shows once after an update.
+  release signature. The first start after an update shows what is new in
+  every version since the one you had.
 
 <details>
 <summary>More screenshots</summary>
+
+![Windows XP theme](docs/screenshot-theme-xp.png)
+
+![Windows Vista theme](docs/screenshot-theme-vista.png)
+
+![Aurora theme](docs/screenshot-theme-aurora.png)
 
 ![Tutorial](docs/screenshot-tutorial.png)
 

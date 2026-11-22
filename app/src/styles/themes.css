@@ -1,0 +1,217 @@
+/* Extra themes and the polish shared by every theme.
+
+   Palette themes only set tokens. "Look" themes (Aurora, Synthwave, Windows
+   XP, Windows Vista, Classic) also restyle a few controls. Everything here
+   is static CSS: no images, no animation loops, and blur only on small,
+   short-lived layers (menus, dialogs), so it costs nothing at start-up and
+   nothing while the window is idle. Tokyo Night palette: MIT, see NOTICE.md. */
+
+/* ---- Polish for every theme ------------------------------------------- */
+.content > * { animation: fade .16s ease-out; }
+.nav { transition: background-color .12s, color .12s; }
+.acct { transition: background-color .08s; }
+.card { box-shadow: 0 1px 2px rgba(0, 0, 0, .10), 0 10px 24px -14px rgba(0, 0, 0, .35); }
+.btn.primary { background-image: linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 62%); }
+.btn.primary:hover { background-image: linear-gradient(180deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .04) 62%); }
+.btn:focus-visible, .nav:focus-visible, .theme-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-chip { transition: border-color .12s, transform .08s; }
+.theme-chip:hover { border-color: var(--accent); }
+.theme-chip:active { transform: translateY(1px); }
+.backdrop { backdrop-filter: blur(3px); }
+.menu { background: color-mix(in srgb, var(--surface-2) 84%, transparent); backdrop-filter: blur(14px) saturate(1.3); }
+.toast { backdrop-filter: blur(10px); }
+/* Hide names: the alias box shows dots instead of text. */
+.masked { -webkit-text-security: disc; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001s !important; transition-duration: .001s !important; }
+}
+
+/* ---- Palette themes ----------------------------------------------------- */
+:root[data-theme="tokyonight"] { --bg: #1a1b26; --surface: #1f2335; --surface-2: #292e42; --text: #c0caf5; --muted: #9aa5ce; --border: #3b4261; --accent: #7aa2f7; --accent-text: #1a1b26; --good: #9ece6a; --warn: #e0af68; --bad: #f7768e; --scheme: dark; }
+:root[data-theme="midnight"] { --bg: #000000; --surface: #0a0a0c; --surface-2: #15161a; --text: #e8e8ea; --muted: #8b8f98; --border: #23252b; --accent: #7c9cff; --accent-text: #05060a; --good: #5fd38d; --warn: #e6b450; --bad: #ff6b6b; --scheme: dark; }
+
+/* ---- Synthwave: neon on violet, glowing accents ------------------------- */
+:root[data-theme="synthwave"] {
+  --bg: #1a0f2e; --surface: #24173f; --surface-2: #33215a; --text: #f6e9ff; --muted: #b9a5db; --border: #4b3880;
+  --accent: #ff4fd8; --accent-text: #1a0f2e; --good: #3cf2c0; --warn: #ffd166; --bad: #ff5c7a; --scheme: dark;
+
+  body { background: linear-gradient(180deg, #170d29 0%, #24113f 55%, #3d1458 100%) fixed; }
+  .sidebar, .details, .launchbar, .statusbar { background: rgba(26, 14, 48, .62); }
+  .brand b { text-shadow: 0 0 12px var(--accent); }
+  .nav.active { box-shadow: inset 3px 0 0 var(--accent), 0 0 22px -8px var(--accent); }
+  .btn.primary { box-shadow: 0 0 16px -2px color-mix(in srgb, var(--accent) 65%, transparent); }
+  .card { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
+  .group-h, .table th { background: rgba(26, 14, 48, .78); backdrop-filter: blur(8px); }
+  .acct.selected { box-shadow: inset 3px 0 0 var(--accent), inset 0 0 28px -14px var(--accent); }
+}
+
+/* ---- Aurora: translucent panels over a soft colour wash ---------------- */
+:root[data-theme="aurora"] {
+  --bg: #0e1220; --surface: #171c2e; --surface-2: #222941; --text: #e8ecf8; --muted: #9aa6c4; --border: #2f3856;
+  --accent: #7ee0c3; --accent-text: #0b1512; --good: #7ee0a0; --warn: #f0c674; --bad: #ff8a9a; --scheme: dark;
+
+  body {
+    background:
+      radial-gradient(900px 600px at 8% -5%, rgba(64, 196, 160, .34), transparent 60%),
+      radial-gradient(900px 700px at 100% 8%, rgba(120, 110, 255, .34), transparent 60%),
+      radial-gradient(800px 600px at 50% 112%, rgba(255, 90, 170, .22), transparent 60%),
+      #0e1220 fixed;
+  }
+  /* The wash behind is smooth, so see-through panels read as frosted glass
+     without paying for a blur on large areas. */
+  .sidebar, .details, .launchbar, .statusbar, .card { background: rgba(255, 255, 255, .055); border-color: rgba(255, 255, 255, .11); }
+  .toolbar { border-color: rgba(255, 255, 255, .11); }
+  .btn { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .14); }
+  .btn:hover { background: rgba(255, 255, 255, .14); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); }
+  .btn.ghost { background: transparent; border-color: transparent; }
+  .input, .select, .textarea { background-color: rgba(8, 10, 20, .42); border-color: rgba(255, 255, 255, .14); }
+  .select option { background: #171c2e; }
+  .seg, .vault-pill, .theme-chip, .badge.muted { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .12); }
+  .modal, .tour-card { background: rgba(23, 28, 46, .78); backdrop-filter: blur(18px) saturate(1.4); border-color: rgba(255, 255, 255, .16); }
+  .group-h, .table th { background: rgba(14, 18, 32, .62); backdrop-filter: blur(10px); }
+  .log { background: rgba(8, 10, 20, .42); }
+}
+
+/* ---- Windows XP (Luna) -------------------------------------------------- */
+:root[data-theme="xp"] {
+  --bg: #ece9d8; --surface: #ffffff; --surface-2: #f1efe2; --text: #000000; --muted: #5c5c5c; --border: #aca899;
+  --accent: #245edb; --accent-text: #ffffff; --good: #2c8a2c; --warn: #9a6200; --bad: #c0281c; --scheme: light;
+  --font: Tahoma, "Segoe UI", sans-serif;
+
+  .sidebar { background: linear-gradient(180deg, #7ba2e7 0%, #6375d6 100%); border-right-color: #3a5fbf; }
+  .brand b { color: #fff; text-shadow: 1px 1px 1px rgba(0, 0, 0, .4); }
+  .brand .mark-bg { fill: #fff; } .brand .mark-on { fill: #245edb; } .brand .mark-off { fill: #9db4e8; }
+  .nav { color: #fff; }
+  .nav:hover { background: rgba(255, 255, 255, .2); color: #fff; }
+  .nav.active { background: #fff; color: #215dc6; box-shadow: none; }
+  .nav .pip { box-shadow: 0 0 0 1px #fff; }
+  .vault-pill, .update-pill { background: #fff; border-color: #3a5fbf; color: #215dc6; }
+  .toolbar, .launchbar, .statusbar { background: #ece9d8; }
+  .statusbar { box-shadow: inset 0 1px 0 #fff; }
+  .group-h, .table th { background: #ece9d8; color: #215dc6; }
+
+  .btn { background: linear-gradient(180deg, #ffffff 0%, #f3f1e7 78%, #d9d4c3 100%); border-color: #003c74; border-radius: 3px; color: #000; }
+  .btn:hover { background: linear-gradient(180deg, #ffffff 0%, #f3f1e7 78%, #d9d4c3 100%); box-shadow: inset 0 0 0 2px #f9c04d; }
+  .btn:active { background: linear-gradient(180deg, #d9d4c3, #f3f1e7); box-shadow: none; }
+  .btn.primary { background: linear-gradient(180deg, #6cc163 0%, #3f9a3c 45%, #2f8530 100%); border-color: #1f5f1f; color: #fff; text-shadow: 1px 1px 0 rgba(0, 0, 0, .35); }
+  .btn.primary:hover { background: linear-gradient(180deg, #7dd173 0%, #48a845 45%, #33913a 100%); box-shadow: none; }
+  .btn.ghost { background: transparent; border-color: transparent; }
+  .btn.ghost:hover { background: rgba(0, 0, 0, .06); box-shadow: none; }
+  .btn.danger { color: #c0281c; }
+  .input, .select, .textarea { border-color: #7f9db9; border-radius: 0; background-color: #fff; }
+
+  .card { border-color: #7f9db9; box-shadow: none; }
+  .card-h { background: linear-gradient(90deg, #ffffff, #c6d3f7); color: #215dc6; font-weight: 700; font-size: 12.5px; text-transform: none; letter-spacing: 0; border-bottom-color: #c6d3f7; }
+  .seg { background: #fff; border-color: #7f9db9; }
+  .acct.selected { background: #316ac5; color: #fff; box-shadow: none; }
+  .acct.selected .sub, .acct.selected .right, .acct.selected .right span { color: #dfe8fb; }
+  .acct.selected .main-tag { color: #ffe680; }
+  .acct.selected .badge { background: #fff; }
+  .acct.selected .check .box { border-color: #fff; }
+  .acct.selected .check input:checked + .box { background-color: #fff; border-color: #fff; filter: none; }
+  .acct.selected .check input:checked + .box::after { border-color: #245edb; }
+
+  .modal, .tour-card { border: 1px solid #0831d9; border-radius: 8px 8px 3px 3px; box-shadow: 0 0 0 1px #0831d9, 4px 4px 14px rgba(0, 0, 0, .45); }
+  .modal-h { background: linear-gradient(180deg, #0997ff 0%, #0053ee 9%, #0050ee 40%, #0066ff 88%, #005bff 94%, #003dd7 100%); color: #fff; font-weight: 700; text-shadow: 1px 1px 1px #0f1089; padding: 7px 8px 7px 12px; border-radius: 7px 7px 0 0; align-items: center; }
+  .modal-h .btn { background: linear-gradient(180deg, #e9907f, #c5422c 55%, #b5321d); border: 1px solid #fff; border-radius: 3px; color: #fff; box-shadow: none; }
+  .modal-b { padding-top: 14px; }
+  .modal-f { background: #ece9d8; border-top: 1px solid #d6d2c2; }
+  .tour-card { background: #ffffe1; }
+  .menu { background: #fff; border-color: #aca899; backdrop-filter: none; box-shadow: 3px 3px 6px rgba(0, 0, 0, .35); }
+}
+
+/* ---- Windows Vista (Aero glass) ---------------------------------------- */
+:root[data-theme="vista"] {
+  --bg: #dfe9f5; --surface: #f6f9fd; --surface-2: #e4edf8; --text: #1b2a3a; --muted: #53637a; --border: #aebfd6;
+  --accent: #2a7fd6; --accent-text: #ffffff; --good: #1d7f3c; --warn: #8a5a00; --bad: #b3261e; --scheme: light;
+
+  body {
+    background:
+      radial-gradient(1000px 420px at 22% -12%, rgba(120, 220, 214, .75), transparent 62%),
+      radial-gradient(900px 460px at 92% -6%, rgba(104, 168, 236, .7), transparent 58%),
+      linear-gradient(180deg, #cfe0f3 0%, #e8f0f9 60%, #dbe7f5 100%) fixed;
+  }
+  .sidebar { background: linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, .34)); border-right-color: #9fb6d2; box-shadow: inset -1px 0 0 rgba(255, 255, 255, .8); }
+  .details, .launchbar, .statusbar, .card { background: rgba(255, 255, 255, .64); }
+  .toolbar { background: rgba(255, 255, 255, .34); }
+  .group-h, .table th { background: rgba(223, 233, 245, .7); backdrop-filter: blur(10px); }
+
+  .btn { background: linear-gradient(180deg, #fdfeff 0%, #e6eff9 49%, #d3e2f4 50%, #e9f1fa 100%); border-color: #8ea9c9; color: #1b2a3a; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .75); }
+  .btn:hover { background: linear-gradient(180deg, #f4fbff 0%, #d9eefc 49%, #bfe2fa 50%, #dff1fd 100%); border-color: #3c9dea; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .8), 0 0 7px rgba(60, 157, 234, .55); }
+  .btn.primary { background: linear-gradient(180deg, #7cc0f6 0%, #3a98ea 49%, #1f7cd6 50%, #44a3ee 100%); border-color: #1b5fa8; color: #fff; text-shadow: 0 1px 1px rgba(0, 40, 90, .5); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .45); }
+  .btn.primary:hover { background: linear-gradient(180deg, #92cdfa 0%, #4aa6f0 49%, #2a88de 50%, #58b0f2 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .55), 0 0 9px rgba(60, 157, 234, .7); }
+  .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+  .btn.ghost:hover { background: rgba(255, 255, 255, .6); border-color: #b8cfe8; box-shadow: none; }
+  .btn.danger { color: #b3261e; }
+  .input, .select, .textarea { background-color: rgba(255, 255, 255, .9); border-color: #9fb6d2; }
+
+  .nav.active { background: linear-gradient(180deg, rgba(255, 255, 255, .95), rgba(206, 229, 251, .95)); box-shadow: inset 0 0 0 1px #9cc3ea; color: #12314f; }
+  .nav:hover { background: rgba(255, 255, 255, .55); }
+  .acct.selected { background: linear-gradient(180deg, rgba(214, 234, 253, .95), rgba(188, 218, 249, .95)); box-shadow: inset 0 0 0 1px #84b8e8; }
+  .seg, .vault-pill, .theme-chip { background: rgba(255, 255, 255, .6); }
+  .card-h { background: linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, 0)); }
+
+  .modal, .tour-card { background: rgba(246, 249, 253, .88); backdrop-filter: blur(16px) saturate(1.5); border-color: rgba(255, 255, 255, .85); box-shadow: 0 0 0 1px #6f8fb5, 0 24px 60px rgba(20, 50, 90, .42); }
+  .modal-h { background: linear-gradient(90deg, #2c6b8c 0%, #5fc0c6 46%, #3f86c4 100%); color: #fff; text-shadow: 0 1px 2px rgba(0, 30, 60, .6); padding: 10px 12px 10px 16px; border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; align-items: center; }
+  .modal-h .btn { color: #fff; }
+  .modal-b { padding-top: 14px; }
+  .menu { background: rgba(246, 249, 253, .86); }
+}
+
+/* ---- Classic (Windows 95) ---------------------------------------------- */
+:root[data-theme="classic"] {
+  --bg: #c0c0c0; --surface: #c0c0c0; --surface-2: #c0c0c0; --text: #000000; --muted: #404040; --border: #808080;
+  --accent: #000080; --accent-text: #ffffff; --good: #006400; --warn: #6b4a00; --bad: #a00000; --scheme: light;
+  --font: "MS Sans Serif", "Microsoft Sans Serif", Tahoma, sans-serif;
+  --bevel-out: inset -1px -1px 0 #0a0a0a, inset 1px 1px 0 #ffffff, inset -2px -2px 0 #808080, inset 2px 2px 0 #dfdfdf;
+  --bevel-in: inset 1px 1px 0 #808080, inset -1px -1px 0 #ffffff, inset 2px 2px 0 #0a0a0a, inset -2px -2px 0 #dfdfdf;
+
+  body { -webkit-font-smoothing: auto; }
+  .sidebar { border-right: 0; box-shadow: inset -1px 0 0 #808080, inset -2px 0 0 #fff; }
+  .brand b { color: #000080; }
+  .nav { color: #000; border-radius: 0; }
+  .nav:hover { background: #d4d0c8; color: #000; }
+  .nav.active { background: #000080; color: #fff; box-shadow: none; }
+  .toolbar, .launchbar, .statusbar, .details { border-color: #808080; box-shadow: inset 0 1px 0 #fff; }
+  .details { box-shadow: inset 1px 0 0 #fff; }
+
+  .btn { background: #c0c0c0; border: 0; border-radius: 0; color: #000; box-shadow: var(--bevel-out); transition: none; }
+  .btn:hover { background: #c0c0c0; }
+  .btn:active { box-shadow: var(--bevel-in); transform: none; padding-top: 1px; }
+  .btn.primary { background: #c0c0c0; color: #000; font-weight: 700; box-shadow: var(--bevel-out), 0 0 0 1px #000; background-image: none; }
+  .btn.primary:hover { background: #c0c0c0; background-image: none; }
+  .btn.ghost { box-shadow: none; }
+  .btn.ghost:hover { background: #d4d0c8; }
+  .btn.danger { color: #a00000; }
+  .btn.danger:hover { background: #c0c0c0; }
+  .input, .select, .textarea, .log { background-color: #fff; border: 0; border-radius: 0; box-shadow: var(--bevel-in); }
+  .input:focus, .select:focus, .textarea:focus { box-shadow: var(--bevel-in); }
+
+  .card { border: 0; border-radius: 0; box-shadow: var(--bevel-out); padding: 2px; }
+  .card-h { background: linear-gradient(90deg, #000080, #1084d0); color: #fff; font-weight: 700; font-size: 12.5px; text-transform: none; letter-spacing: 0; border-bottom: 0; padding: 4px 8px; }
+  .seg { background: #c0c0c0; border: 0; border-radius: 0; padding: 2px; gap: 0; box-shadow: var(--bevel-in); }
+  .seg button { border-radius: 0; color: #000; }
+  .seg button.active { background: #000080; color: #fff; }
+  .badge, .theme-chip, .vault-pill, .update-pill, .avatar, .tour-icon, .toast { border-radius: 0; }
+  .vault-pill, .update-pill, .theme-chip { background: #c0c0c0; border: 0; box-shadow: var(--bevel-out); color: #000; }
+  .theme-chip.active { box-shadow: var(--bevel-in); }
+  .toggle .track { border-radius: 0; background: #fff; box-shadow: var(--bevel-in); }
+  .toggle .track::after { border-radius: 0; background: #c0c0c0; box-shadow: var(--bevel-out); }
+  .toggle input:checked + .track { background: #000080; }
+  .toggle input:checked + .track::after { background: #c0c0c0; }
+  .acct { border-bottom-color: #a0a0a0; }
+  .acct.selected { background: #000080; color: #fff; box-shadow: none; }
+  .acct.selected .sub, .acct.selected .right, .acct.selected .right span, .acct.selected .main-tag { color: #fff; }
+  .acct.selected .badge { background: #c0c0c0; }
+  .group-h, .table th { background: #c0c0c0; color: #000; }
+
+  .modal, .tour-card, .menu { background: #c0c0c0; border: 0; border-radius: 0; box-shadow: var(--bevel-out), 3px 3px 0 rgba(0, 0, 0, .45); padding: 3px; backdrop-filter: none; }
+  .modal-h { background: linear-gradient(90deg, #000080, #1084d0); color: #fff; font-weight: 700; padding: 3px 3px 3px 8px; align-items: center; }
+  .modal-h .btn { background: #c0c0c0; color: #000; box-shadow: var(--bevel-out); width: 22px; height: 20px; }
+  .modal-b { padding-top: 12px; }
+  .backdrop { backdrop-filter: none; }
+  .tour-hole { border-radius: 0; }
+  ::-webkit-scrollbar-thumb { background: #c0c0c0; border: 0; border-radius: 0; box-shadow: var(--bevel-out); }
+  ::-webkit-scrollbar-track { background: repeating-conic-gradient(#fff 0% 25%, #c0c0c0 0% 50%) 0 0 / 2px 2px; }
+}

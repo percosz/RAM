@@ -45,7 +45,8 @@ export interface Account {
 
 export type ThemeKind =
   | "System" | "Light" | "Dark" | "Mocha" | "Macchiato" | "Frappe" | "Latte"
-  | "Nord" | "Dracula" | "Gruvbox" | "RosePine" | "Lineage";
+  | "Nord" | "Dracula" | "Gruvbox" | "RosePine" | "Lineage"
+  | "TokyoNight" | "Midnight" | "Synthwave" | "Aurora" | "WindowsXp" | "WindowsVista" | "Classic";
 
 export type Density = "Compact" | "Normal" | "Comfortable" | "Large";
 

@@ -81,7 +81,7 @@ function Crashes({ toast, accountNames, nameOf }: { toast: (t: string, tone?: "g
           <div className="empty"><div><b>Nothing recorded yet.</b><br /><span className="muted">When a Roblox client disconnects, crashes or is closed, it shows up here with the reason from its log.</span></div></div>
         ) : shown.map((r) => (
           <div key={r.id} className="crash">
-            <div className="who"><Avatar name={r.username || "?"} seed={r.account ?? 0} />{r.username ? nameOf(r.username) : <span className="muted">Unknown account</span>}</div>
+            <div className="who"><Avatar name={r.username ? nameOf(r.username) : "?"} seed={r.account ?? 0} />{r.username ? nameOf(r.username) : <span className="muted">Unknown account</span>}</div>
             <div className={`kind ${toneOf(r.kind)}`}>{endKindLabel(r.kind)}</div>
             <div className="when">{when(r.at)}</div>
             <div className="meta">{r.place_name || (r.place_id ? `Place ${r.place_id}` : "No game joined")} · after {dur(r.uptime_secs)} · PID {r.pid}</div>

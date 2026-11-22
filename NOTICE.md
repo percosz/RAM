@@ -53,7 +53,7 @@ RoALT's name, logo and distinctive look are not reused; RAM has its own.
 | [React](https://react.dev) | MIT | Front-end |
 | [Vite](https://vitejs.dev), [TypeScript](https://www.typescriptlang.org) | MIT, Apache-2.0 | Build-time only |
 | [lucide-react](https://lucide.dev) | ISC | Icons |
-| Colour palettes: [Catppuccin](https://github.com/catppuccin/catppuccin), [Nord](https://www.nordtheme.com), [Dracula](https://draculatheme.com), [Gruvbox](https://github.com/morhetz/gruvbox), [Rosé Pine](https://rosepinetheme.com) | MIT | Theme presets |
+| Colour palettes: [Catppuccin](https://github.com/catppuccin/catppuccin), [Nord](https://www.nordtheme.com), [Dracula](https://draculatheme.com), [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme), [Rosé Pine](https://rosepinetheme.com) | MIT | Theme presets |
 
 The exact versions are pinned in `Cargo.lock` and `app/package-lock.json`.
 

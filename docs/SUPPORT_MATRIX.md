@@ -26,12 +26,12 @@ handler, which is what the "on this PC" notes refer to.
 | Tick boxes per row, per group and "all shown" | Verified | No | Screenshotted; Ctrl/Shift selection still works. |
 | Drag rows to reorder (one row or the ticked selection; dropping in another group moves it) | Verified | No | Driven with mouse messages posted to the window; the new order was read back from `store.json`. |
 | Right-click menu (copy, paste cookie, Main, favorite, groups, sort, remove) | Verified | No | Menu screenshotted. Paste cookie asks Roblox whose cookie it is and refuses another account's (that check needs a live cookie). |
-| Hide usernames (first three characters only) | Verified | No | Screenshotted; applies to the list, details, clients and crash history. |
+| Hide names (usernames and aliases masked, avatars as initials, Robux and user IDs hidden) | Verified | No | Screenshotted; applies to the list, details, clients and crash history. |
 | Start-up time | Verified | No | 0.65 s to the window on a copy of a real data folder with seven stale browser profiles (28.8 s before v0.3.2). |
 | Roblox headshots | Verified | No | `thumbnails.roblox.com` batch of up to 100 ids, no cookie; URLs cached a day in `store.json`; initials until the image loads. Real headshots loaded for the demo ids. |
 | Groups, aliases, notes, favorites, Main pin | Verified | No | Main is excluded from Select All (Ctrl+A), from batch launches and from every performance setting. |
 | Row sizes Compact / Normal / Comfortable / Large | Verified | No | Compact screenshotted at the 900×560 minimum. |
-| Themes, accent colour, corner radius | Verified | No | Palettes are CSS variables on `:root[data-theme]`. |
+| Themes (19), accent colour, corner radius | Verified | No | Palettes are CSS variables on `:root[data-theme]`; Windows XP, Vista, Classic, Aurora and Synthwave also restyle controls. The seven added in 0.5 were screenshotted on the Accounts view, a dialog and Settings; every other screen in every theme was not checked. |
 | Versioned store with atomic saves and backup recovery | Verified | No | Unit tests cover interrupted saves, corrupt files, newer versions. A v0.2 store loads (dropped settings are ignored). |
 | Keyboard: Ctrl+A select all, Enter join, Delete remove, Esc close dialog | Verified | No | |
 | High DPI | Conditional | No | WebView2 scales the page with the monitor; checked at 100% only on this machine. |

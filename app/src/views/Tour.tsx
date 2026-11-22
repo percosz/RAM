@@ -49,7 +49,7 @@ const STEPS: Step[] = [
         <li><b>Tick boxes</b> pick several accounts.</li>
         <li><b>Drag</b> a row to reorder.</li>
         <li><b>Right-click</b> for the rest: copy the cookie or password, set as Main, move to a group, remove.</li>
-        <li>The eye button hides usernames for screenshots.</li>
+        <li>The eye button hides names, avatars and Robux for screenshots.</li>
       </ul>
     </>,
   },

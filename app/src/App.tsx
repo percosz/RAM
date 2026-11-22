@@ -12,6 +12,7 @@ import { Tour } from "./views/Tour";
 import { VaultUnlockDialog } from "./dialogs";
 import "./styles/ui.css";
 import "./styles/app.css";
+import "./styles/themes.css";
 
 type View = "accounts" | "clients" | "diagnostics" | "settings";
 
@@ -72,7 +73,9 @@ function Shell() {
   const invalid = accounts.filter((a) => a.sign_in.state === "SignedOut").length;
   const running = accounts.filter((a) => a.client === "Running").length;
   // "What's new" once after an update: the stored seen_version lags the running one.
-  const whatsNew = !!snap && snap.settings.seen_version !== "" && snap.settings.seen_version !== snap.version;
+  // (A fresh install starts with seen_version set to its own version; an
+  // older data file with none recorded gets the notes once.)
+  const whatsNew = !!snap && snap.settings.seen_version !== snap.version;
 
   const vaultPill = vault && (
     <div

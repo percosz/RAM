@@ -51,7 +51,11 @@ export function useApp(): Ctx {
 const THEME_ATTR: Record<string, string> = {
   System: "", Light: "light", Dark: "dark", Mocha: "mocha", Macchiato: "macchiato", Frappe: "frappe", Latte: "latte",
   Nord: "nord", Dracula: "dracula", Gruvbox: "gruvbox", RosePine: "rosepine", Lineage: "lineage",
+  TokyoNight: "tokyonight", Midnight: "midnight", Synthwave: "synthwave", Aurora: "aurora",
+  WindowsXp: "xp", WindowsVista: "vista", Classic: "classic",
 };
+/** Themes whose look depends on their own corner shape; the Corners slider is ignored for them. */
+export const FIXED_CORNERS: Record<string, number> = { WindowsXp: 3, Classic: 0 };
 
 function applyTheme(s: Settings) {
   const root = document.documentElement;
@@ -69,8 +73,10 @@ function applyTheme(s: Settings) {
     root.style.removeProperty("--accent");
     root.style.removeProperty("--accent-text");
   }
-  root.style.setProperty("--radius", `${Math.max(0, Math.min(16, s.corner_radius)) + 4}px`);
-  root.style.setProperty("--radius-sm", `${Math.max(0, Math.min(16, s.corner_radius))}px`);
+  const fixed = FIXED_CORNERS[s.theme];
+  const corner = fixed ?? Math.max(0, Math.min(16, s.corner_radius));
+  root.style.setProperty("--radius", `${fixed ?? corner + 4}px`);
+  root.style.setProperty("--radius-sm", `${corner}px`);
 }
 
 /** "Thornwick_Eli" → "Tho********" when hiding, like niccs' manager. */

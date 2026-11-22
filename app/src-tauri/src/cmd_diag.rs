@@ -138,6 +138,9 @@ fn logs_dir() -> Option<PathBuf> {
     ram_win::paths::roblox_logs_dir()
 }
 
+/// Crash dumps (`.dmp`) written since `since`. Only dump files count: the
+/// crash handler rewrites `settings.dat` and `metadata` in the same folder on
+/// every run, which used to make each ending look like a crash.
 fn count_dumps(since: i64) -> usize {
     let Some(dir) = logs_dir() else { return 0 };
     let mut n = 0;
@@ -148,6 +151,8 @@ fn count_dumps(since: i64) -> usize {
             let p = e.path();
             if p.is_dir() {
                 stack.push(p);
+            } else if !is_dump(&p) {
+                continue;
             } else if let Ok(m) = e.metadata() {
                 let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
                 if t >= since {
@@ -157,6 +162,10 @@ fn count_dumps(since: i64) -> usize {
         }
     }
     n
+}
+
+fn is_dump(p: &Path) -> bool {
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("dmp"))
 }
 
 /// The `_Player_` log a client started at `start` wrote: nearest start time
@@ -420,6 +429,12 @@ fn tick(app: &AppHandle) {
         ));
         let Some(kind) = kind else { continue };
         if matches!(kind, EndKind::Closed | EndKind::Teleported) {
+            continue;
+        }
+        // The history is about the accounts in RAM. A client RAM cannot tie
+        // to one of them (started outside RAM, or an account that is not in
+        // the list) is logged above but not recorded.
+        if w.account.is_none() {
             continue;
         }
         s.store.push_crash(CrashRecord {

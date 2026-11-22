@@ -55,6 +55,7 @@ impl AppState {
         let store_file = StoreFile::new(data_dir.join("store.json"));
         let mut startup_note = String::new();
         let mut read_only = false;
+        let first_run = !data_dir.join("store.json").exists();
         let store = match store_file.load() {
             Ok(loaded) => {
                 if let LoadOrigin::Backup { preserved_as } = &loaded.origin {
@@ -73,6 +74,12 @@ impl AppState {
                 Store::default()
             }
         };
+        // A fresh install has no update to be told about: record the running
+        // version so "What's new" first appears after the next update.
+        let mut store = store;
+        if first_run && store.settings.seen_version.is_empty() {
+            store.settings.seen_version = env!("CARGO_PKG_VERSION").to_string();
+        }
         let vault_path = data_dir.join("vault.bin");
         let mut vault = Vault::open(&vault_path).unwrap_or_else(|e| {
             log.error(&format!("vault load: {e}"));

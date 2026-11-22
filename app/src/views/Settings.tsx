@@ -3,7 +3,7 @@ import { GraduationCap } from "lucide-react";
 import { open as pickDialog } from "@tauri-apps/plugin-dialog";
 import { api, type BrowserChoice, type GraphicsSettings, type Msaa, type RenderMode, type Texture, type ThemeKind } from "../api";
 import { Btn, Field, Toggle } from "../components";
-import { useApp } from "../store";
+import { FIXED_CORNERS, useApp } from "../store";
 import { ChangePasswordDialog, ConfirmDialog, ImportDialog, VaultSetupDialog } from "../dialogs";
 
 const THEMES: Array<{ id: ThemeKind; name: string; bg: string; fg: string }> = [
@@ -19,6 +19,13 @@ const THEMES: Array<{ id: ThemeKind; name: string; bg: string; fg: string }> = [
   { id: "Gruvbox", name: "Gruvbox", bg: "#282828", fg: "#fe8019" },
   { id: "RosePine", name: "Rosé Pine", bg: "#191724", fg: "#eb6f92" },
   { id: "Lineage", name: "Lineage", bg: "#1b1d1a", fg: "#8fa37a" },
+  { id: "TokyoNight", name: "Tokyo Night", bg: "#1a1b26", fg: "#7aa2f7" },
+  { id: "Midnight", name: "Midnight", bg: "#000000", fg: "#7c9cff" },
+  { id: "Synthwave", name: "Synthwave", bg: "#24113f", fg: "#ff4fd8" },
+  { id: "Aurora", name: "Aurora (glass)", bg: "#16303a", fg: "#7ee0c3" },
+  { id: "WindowsXp", name: "Windows XP", bg: "#ece9d8", fg: "#245edb" },
+  { id: "WindowsVista", name: "Windows Vista", bg: "#cfe0f3", fg: "#2a7fd6" },
+  { id: "Classic", name: "Classic (95)", bg: "#c0c0c0", fg: "#000080" },
 ];
 const ACCENTS = [0xcba6f7, 0x89b4fa, 0x94e2d5, 0xa6e3a1, 0xf9e2af, 0xfab387, 0xf38ba8, 0xeb6f92, 0xf5c2e7, 0x5b9be0];
 
@@ -128,10 +135,10 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             <span />
             <div className="hint">Compact shows one line per account; the others show the alias and description underneath.</div>
           </div>
-          <Toggle checked={settings.hide_usernames} onChange={(c) => saveSettings({ hide_usernames: c })} label="Hide usernames" hint="Shows only the first three characters of each username, for screenshots and streams. Aliases stay visible." />
+          <Toggle checked={settings.hide_usernames} onChange={(c) => saveSettings({ hide_usernames: c })} label="Hide names" hint="For screenshots and streams: usernames and aliases show only their first three characters, and avatars, Robux and user IDs are hidden." />
           <div className="kv">
             <span>Corners</span>
-            <input type="range" min={0} max={16} value={settings.corner_radius} onChange={(e) => saveSettings({ corner_radius: Number(e.target.value) })} />
+<input type="range" min={0} max={16} value={settings.corner_radius} disabled={settings.theme in FIXED_CORNERS} title={settings.theme in FIXED_CORNERS ? "This theme has its own corners" : undefined} onChange={(e) => saveSettings({ corner_radius: Number(e.target.value) })} />
           </div>
         </div>
       </section>

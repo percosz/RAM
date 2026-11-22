@@ -135,9 +135,58 @@ pub fn notes_for(changelog: &str, version: &str) -> String {
     out.trim().to_string()
 }
 
+/// `1.2.3` as a comparable triple; missing or odd parts count as 0.
+fn version_key(v: &str) -> (u32, u32, u32) {
+    let mut it = v.trim().trim_start_matches('v').split('.').map(|p| p.trim().parse::<u32>().unwrap_or(0));
+    (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
+}
+
+/// The CHANGELOG sections for every version after `seen` up to and
+/// including `current`, newest first, each under its `## <version>`
+/// heading. With `seen` empty (never recorded) or not older than `current`,
+/// only the section for `current`, without a heading.
+pub fn notes_since(changelog: &str, seen: &str, current: &str) -> String {
+    let cur = version_key(current);
+    let from = version_key(seen);
+    if seen.trim().is_empty() || from >= cur {
+        return notes_for(changelog, current);
+    }
+    let mut out = String::new();
+    let mut sections = 0;
+    let mut inside = false;
+    for line in changelog.lines() {
+        if let Some(rest) = line.strip_prefix("## ") {
+            let v = rest.trim().split_whitespace().next().unwrap_or("").trim_start_matches('v');
+            let key = version_key(v);
+            inside = v.chars().next().is_some_and(|c| c.is_ascii_digit()) && key > from && key <= cur;
+            if inside {
+                sections += 1;
+                let kept = out.trim_end().len();
+                out.truncate(kept);
+                if !out.is_empty() {
+                    out.push_str("\n\n");
+                }
+                out.push_str(&format!("## {v}\n"));
+            }
+            continue;
+        }
+        if inside {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if sections <= 1 {
+        return notes_for(changelog, current);
+    }
+    out.trim().to_string()
+}
+
+/// What "What's new" shows: everything since the version whose notes the
+/// user last saw.
 #[tauri::command]
-pub fn release_notes() -> String {
-    notes_for(CHANGELOG, env!("CARGO_PKG_VERSION"))
+pub fn release_notes(state: State<'_, Shared>) -> String {
+    let seen = state.lock().map(|s| s.store.settings.seen_version.clone()).unwrap_or_default();
+    notes_since(CHANGELOG, &seen, env!("CARGO_PKG_VERSION"))
 }
 
 #[tauri::command]
@@ -170,5 +219,21 @@ mod tests {
         assert_eq!(notes_for(log, "0.3.0"), "### New\n- A thing");
         assert_eq!(notes_for(log, "0.2.0"), "- Old");
         assert_eq!(notes_for(log, "9.9.9"), "");
+    }
+
+    #[test]
+    fn notes_since_cover_every_skipped_version() {
+        let log = "# Changelog\n\nIntro.\n\n## 0.5.0 (2026-11-22)\n- Five\n\n## 0.4.10\n- Ten\n\n## 0.4.2\n- Two\n\n## 0.4.1\n- One\n";
+        // Updated across several versions: all of them, newest first, with headings.
+        assert_eq!(notes_since(log, "0.4.1", "0.5.0"), "## 0.5.0\n- Five\n\n## 0.4.10\n- Ten\n\n## 0.4.2\n- Two");
+        // 0.4.10 is newer than 0.4.2 (numbers, not text).
+        assert_eq!(notes_since(log, "0.4.2", "0.4.10"), "- Ten");
+        // One step, nothing recorded, same version, or a downgrade: just the current section.
+        assert_eq!(notes_since(log, "0.4.10", "0.5.0"), "- Five");
+        assert_eq!(notes_since(log, "", "0.5.0"), "- Five");
+        assert_eq!(notes_since(log, "0.5.0", "0.5.0"), "- Five");
+        assert_eq!(notes_since(log, "0.9.0", "0.4.2"), "- Two");
+        assert_eq!(version_key("v1.2.3"), (1, 2, 3));
+        assert_eq!(version_key("1.x"), (1, 0, 0));
     }
 }

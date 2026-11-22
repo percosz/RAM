@@ -442,13 +442,26 @@ pub enum ThemeKind {
     RosePine,
     /// Muted, Rogue Lineage-inspired palette.
     Lineage,
+    TokyoNight,
+    /// Pure black, for OLED screens.
+    Midnight,
+    Synthwave,
+    /// Translucent panels over a soft colour wash.
+    Aurora,
+    WindowsXp,
+    WindowsVista,
+    /// Windows 95-style grey with bevelled controls.
+    Classic,
 }
 
 impl ThemeKind {
     /// All themes in the order shown in the picker.
     pub fn all() -> &'static [ThemeKind] {
         use ThemeKind::*;
-        &[System, Light, Dark, Mocha, Macchiato, Frappe, Latte, Nord, Dracula, Gruvbox, RosePine, Lineage]
+        &[
+            System, Light, Dark, Mocha, Macchiato, Frappe, Latte, Nord, Dracula, Gruvbox, RosePine, Lineage, TokyoNight, Midnight,
+            Synthwave, Aurora, WindowsXp, WindowsVista, Classic,
+        ]
     }
 
     pub fn label(self) -> &'static str {
@@ -465,6 +478,13 @@ impl ThemeKind {
             ThemeKind::Gruvbox => "Gruvbox",
             ThemeKind::RosePine => "Rosé Pine",
             ThemeKind::Lineage => "Lineage (muted)",
+            ThemeKind::TokyoNight => "Tokyo Night",
+            ThemeKind::Midnight => "Midnight (black)",
+            ThemeKind::Synthwave => "Synthwave",
+            ThemeKind::Aurora => "Aurora (glass)",
+            ThemeKind::WindowsXp => "Windows XP",
+            ThemeKind::WindowsVista => "Windows Vista",
+            ThemeKind::Classic => "Classic (95)",
         }
     }
 }

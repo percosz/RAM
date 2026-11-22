@@ -4,6 +4,21 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.5.0 (2026-11-22)
+
+### New
+- **Seven more themes.** **Windows XP** (Luna blue side pane, green primary buttons, blue title bars on dialogs), **Windows Vista** (Aero glass over a soft aurora), **Classic (95)** (grey, bevelled, navy title bars), **Aurora** (see-through panels over a colour wash), **Synthwave** (neon on violet), **Tokyo Night** and **Midnight** (pure black). Settings → Appearance.
+- **A bit prettier everywhere.** Dialogs blur what is behind them, menus are translucent, cards have a soft shadow, primary buttons a slight gloss, and tabs fade in when you switch. It is all plain styling with no images or running animations, so start-up time and memory use are unchanged.
+- **"What's new" after every update.** The first start after an update shows the notes of every version since the one you had, not just the latest.
+- **Hide names hides more.** The eye button (or Settings → Appearance → Hide names) now also masks aliases, swaps avatars for initials, and hides Robux and user IDs; the alias box shows dots.
+
+### Fixed
+- **Ending a client with End task was still recorded as a crash.** The exit code was read correctly, but the check for a crash dump counted any file Roblox touched in its crash folder, and Roblox rewrites a small settings file there on every run. Only real dump files (`.dmp`) count now.
+- **"What's new" never appeared.** RAM only recorded the version you had seen when you closed that dialog, so it had nothing to compare against and never opened it.
+
+### Changed
+- The crash history only records clients that belong to an account in RAM. A client started outside RAM, or for an account that is not in your list, is still written to the debug log but no longer shows up as a crash.
+
 ## 0.4.2 (2026-11-21)
 
 ### New

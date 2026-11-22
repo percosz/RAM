@@ -6,7 +6,7 @@ import { Plus, Download, RefreshCw, Trash2, Globe, KeyRound, Star, Crown, Play, 
 import { api, ago, signInLabel, type Account, type Game } from "../api";
 import { Avatar, Btn, Field, Modal, StatusBadge, Toggle, tone } from "../components";
 import { ContextMenu, type MenuItem } from "../menu";
-import { useApp } from "../store";
+import { maskName, useApp } from "../store";
 import { AddAccountDialog, ConfirmDialog, ImportDialog, RevealCookieDialog } from "../dialogs";
 
 const ROGUE_LINEAGE = 3016661674;
@@ -20,7 +20,7 @@ function matches(a: Account, q: string): boolean {
 /** Second line of a row: launch progress, else alias and description, else the sign-in detail. */
 function subtitle(a: Account, hide: boolean, ls?: { state: string; message: string }): string {
   if (ls && ls.state !== "Running" && ls.message) return ls.message;
-  const parts = [a.alias, a.notes.split(/\r?\n/)[0] ?? ""].map((s) => s.trim()).filter(Boolean);
+  const parts = [maskName(a.alias.trim(), hide), a.notes.split(/\r?\n/)[0] ?? ""].map((s) => s.trim()).filter(Boolean);
   if (parts.length) return parts.join(" · ");
   if (!hide && a.display_name && a.display_name !== a.username) return a.display_name;
   if (a.sign_in.detail && a.sign_in.state !== "Verified") return a.sign_in.detail;
@@ -310,7 +310,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
             {groups.map((g) => <option key={g} value={g}>{g} ({accounts.filter((a) => a.group === g).length})</option>)}
           </select>
         )}
-        <Btn icon onClick={() => saveSettings({ hide_usernames: !hide })} title={hide ? "Show usernames" : "Hide usernames"}>{hide ? <EyeOff /> : <Eye />}</Btn>
+        <Btn icon onClick={() => saveSettings({ hide_usernames: !hide })} title={hide ? "Show names, avatars and Robux" : "Hide names, avatars and Robux"}>{hide ? <EyeOff /> : <Eye />}</Btn>
         <Btn onClick={() => check(selected.length ? selected : accounts.map((a) => a.id))} title="Check sign-in (selected, or all)"><RefreshCw />Check</Btn>
         <Btn data-tour="import" onClick={() => setDialog({ kind: "import" })}><Download />Import</Btn>
         <Btn data-tour="add" kind="primary" onClick={() => setDialog({ kind: "add" })}><Plus />Add</Btn>
@@ -349,13 +349,13 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
                       <input type="checkbox" checked={on} onChange={() => toggle(a)} />
                       <span className="box" />
                     </label>
-                    <Avatar name={hide ? a.username.slice(0, 1) : a.username} seed={a.id} src={a.avatar_url} />
+                    <Avatar name={hide ? a.username.slice(0, 1) : a.username} seed={a.id} src={hide ? null : a.avatar_url} />
                     <div className="grow" style={{ minWidth: 0 }}>
                       <div className="name ellipsis">{nameOf(a.username)}{a.is_main && <span className="main-tag">MAIN</span>}{a.favorite && <Star style={{ width: 12, height: 12, marginLeft: 6, color: "var(--warn)", verticalAlign: "-1px" }} />}{a.full_quality && !a.is_main && <Gauge style={{ width: 12, height: 12, marginLeft: 6, color: "var(--muted)", verticalAlign: "-1px" }} />}</div>
                       <div className={`sub ellipsis ${ls?.state === "Failed" ? "bad" : ""}`} title={sub}>{sub}</div>
                     </div>
                     <div><StatusBadge a={a} /></div>
-                    <div className="right">{a.client === "Running" ? <span className="accent">● in game</span> : a.robux != null ? <span>R$ {a.robux.toLocaleString()}</span> : a.has_cookie ? <span title="Cookie stored"><KeyRound style={{ width: 13, height: 13 }} /></span> : ""}</div>
+                    <div className="right">{a.client === "Running" ? <span className="accent">● in game</span> : a.robux != null ? <span>R$ {hide ? "•••" : a.robux.toLocaleString()}</span> : a.has_cookie ? <span title="Cookie stored"><KeyRound style={{ width: 13, height: 13 }} /></span> : ""}</div>
                     <div className="right">{ago(a.last_used)}</div>
                     <div className="right">{a.premium ? <Crown style={{ width: 14, height: 14, color: "var(--warn)" }} /> : null}</div>
                   </div>
@@ -423,7 +423,7 @@ function Details({ a, onOpenBrowser, onCheck, onRemove }: { a: Account; onOpenBr
   return (
     <>
       <div className="head">
-        <Avatar lg name={hide ? a.username.slice(0, 1) : a.username} seed={a.id} src={a.avatar_url} />
+        <Avatar lg name={hide ? a.username.slice(0, 1) : a.username} seed={a.id} src={hide ? null : a.avatar_url} />
         <div className="t grow">
           <b className="ellipsis">{nameOf(a.username)}</b>
           <span className="ellipsis">{!hide && a.display_name && a.display_name !== a.username ? `${a.display_name} · ` : ""}{hide ? "ID hidden" : a.roblox_user_id ? `ID ${a.roblox_user_id}` : "ID unknown"}</span>
@@ -431,7 +431,7 @@ function Details({ a, onOpenBrowser, onCheck, onRemove }: { a: Account; onOpenBr
       </div>
       <div className="chips">
         <span className={`badge ${t}`} title={a.sign_in.detail}><span className="dot" />{a.checking ? "Checking…" : signInLabel(a.sign_in.state)}{a.sign_in.last_check ? ` · ${ago(a.sign_in.last_check)}` : ""}</span>
-        {a.robux != null && <span className="badge accent">R$ {a.robux.toLocaleString()}</span>}
+        {a.robux != null && <span className="badge accent">R$ {hide ? "•••" : a.robux.toLocaleString()}</span>}
         {a.premium && <span className="badge warn">Premium</span>}
         {a.client === "Running" && <span className="badge good">In game</span>}
         {!a.has_cookie ? <span className="badge muted">no cookie</span>
@@ -448,7 +448,7 @@ function Details({ a, onOpenBrowser, onCheck, onRemove }: { a: Account; onOpenBr
       <div className="hint">Right-click the account for copy, paste cookie, groups and remove.</div>
 
       <Field label="Alias">
-        <div className="inline"><input className="input" value={alias} onChange={(e) => setAlias(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save({ id: a.id, alias })} placeholder="A name only you see" /><Btn sm onClick={() => save({ id: a.id, alias })} disabled={alias === a.alias}>Set</Btn></div>
+        <div className="inline"><input className={`input ${hide ? "masked" : ""}`} value={alias} onChange={(e) => setAlias(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save({ id: a.id, alias })} placeholder="A name only you see" /><Btn sm onClick={() => save({ id: a.id, alias })} disabled={alias === a.alias}>Set</Btn></div>
       </Field>
       <Field label="Group">
         <div className="inline"><input className="input" value={grp} onChange={(e) => setGrp(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save({ id: a.id, group: grp })} placeholder="e.g. Farm" /><Btn sm onClick={() => save({ id: a.id, group: grp })} disabled={grp === a.group}>Set</Btn></div>

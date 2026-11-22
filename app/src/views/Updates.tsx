@@ -58,17 +58,20 @@ export function UpdateDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Shown once after RAM has been updated: the notes of the version now running. */
+/** Shown once at the first start after an update: the notes of every version since the one last seen. */
 export function WhatsNewDialog() {
   const { snap, refresh } = useApp();
   const [notes, setNotes] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
   useEffect(() => { api.releaseNotes().then(setNotes).catch(() => setNotes("")); }, []);
-  if (!open || !snap || notes === null) return null;
   const close = async () => { setOpen(false); await api.markSeenVersion().catch(() => {}); void refresh(); };
+  // Nothing written for this version: record it as seen without a dialog.
+  useEffect(() => { if (notes === "") void close(); }, [notes]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!open || !snap || !notes) return null;
   return (
-    <Modal title={`What's new in RAM ${snap.version}`} onClose={close} footer={<Btn kind="primary" onClick={close}>Got it</Btn>}>
-      <Notes text={notes} />
+    <Modal title={`What's new in RAM ${snap.version}`} onClose={close} wide={notes.includes("\n## ")} footer={<Btn kind="primary" onClick={close}>Got it</Btn>}>
+      {/* The notes scroll; the title and "Got it" stay in view. */}
+      <div style={{ maxHeight: "58vh", overflow: "auto", paddingRight: 6 }}><Notes text={notes} /></div>
     </Modal>
   );
 }
