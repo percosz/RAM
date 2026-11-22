@@ -3432,7 +3432,7 @@ dependencies = [
 
 [[package]]
 name = "ram-tauri"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "ram-core",
  "ram-win",

@@ -137,13 +137,17 @@
    through. Windows XP and Classic are meant to be solid and stay that way. */
 :root[data-backdrop]:not([data-theme="xp"]):not([data-theme="classic"]) {
   body { background: transparent; }
-  body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: color-mix(in srgb, var(--bg) 56%, transparent); }
-  .sidebar, .details, .launchbar, .statusbar, .card { background: color-mix(in srgb, var(--surface) 46%, transparent); }
+  /* --tint / --tint-panel come from Settings → See-through (percent of the
+     theme's colour in front of the desktop). */
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: color-mix(in srgb, var(--bg) var(--tint, 70%), transparent); }
+  .sidebar, .details, .launchbar, .statusbar, .card { background: color-mix(in srgb, var(--surface) var(--tint-panel, 56%), transparent); }
   .toolbar { background: transparent; }
-  .group-h, .table th { background: color-mix(in srgb, var(--bg) 52%, transparent); backdrop-filter: blur(12px); }
-  .input, .select, .textarea, .log { background-color: color-mix(in srgb, var(--surface) 62%, transparent); }
-  .btn:not(.primary):not(.ghost) { background: color-mix(in srgb, var(--surface-2) 62%, transparent); }
-  .seg, .vault-pill, .theme-chip { background: color-mix(in srgb, var(--surface-2) 50%, transparent); }
+  .group-h, .table th { background: color-mix(in srgb, var(--bg) var(--tint, 70%), transparent); backdrop-filter: blur(12px); }
+  .input, .select, .textarea, .log { background-color: color-mix(in srgb, var(--surface) var(--tint, 70%), transparent); }
+  .btn:not(.primary):not(.ghost) { background: color-mix(in srgb, var(--surface-2) var(--tint, 70%), transparent); }
+  .seg, .vault-pill, .theme-chip { background: color-mix(in srgb, var(--surface-2) var(--tint-panel, 56%), transparent); }
+  /* Text over an unblurred desktop needs an edge to stay readable. */
+  .acct .name, .acct .sub, .group-h, .statusbar, .hint, .empty { text-shadow: 0 1px 2px color-mix(in srgb, var(--bg) 85%, transparent); }
   .modal, .tour-card { background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(18px) saturate(1.4); }
 }
 
@@ -166,3 +170,7 @@
 .presence-dot.accent { background: var(--accent); }
 .presence-dot.warn { background: var(--warn); }
 :root[data-density="compact"] .presence-dot { width: 9px; height: 9px; right: -2px; bottom: -2px; }
+
+/* The first launch-bar group gained the saved-places button: give it the
+   room it needs so the Follow group wraps instead of being overlapped. */
+.launchbar .lgroup:first-child { flex: 3 1 410px; }

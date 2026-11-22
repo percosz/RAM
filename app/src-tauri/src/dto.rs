@@ -71,6 +71,9 @@ pub struct Snapshot {
     pub backdrop: String,
     /// Windows build number (22000 and up is Windows 11), 0 when unknown.
     pub windows_build: u32,
+    /// Windows' "Transparency effects" setting; Mica and Acrylic are solid
+    /// colours without it.
+    pub transparency_effects: bool,
 }
 
 #[derive(Deserialize)]
@@ -170,6 +173,7 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         github_repo: crate::cmd_update::GITHUB_REPO.to_string(),
         backdrop: s.backdrop.to_string(),
         windows_build: s.windows_build,
+        transparency_effects: ram_win::launcher_info::transparency_effects(),
     }
 }
 

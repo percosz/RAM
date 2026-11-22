@@ -64,6 +64,10 @@ let titleBarDark: boolean | null = null;
 function applyTheme(s: Settings, backdrop: string) {
   const root = document.documentElement;
   if (backdrop) root.setAttribute("data-backdrop", backdrop); else root.removeAttribute("data-backdrop");
+  // How much of the theme's colour sits in front of the desktop.
+  const tint = Math.max(20, Math.min(95, s.backdrop_tint || 70));
+  root.style.setProperty("--tint", `${tint}%`);
+  root.style.setProperty("--tint-panel", `${Math.max(10, tint - 14)}%`);
   let name = THEME_ATTR[s.theme] ?? "";
   if (!name) name = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   root.setAttribute("data-theme", name);

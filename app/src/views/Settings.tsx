@@ -144,14 +144,23 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
           ))}
           <div className="kv">
             <span>Window backdrop</span>
-            <Seg sm value={settings.backdrop} options={[["", "Solid"], ["mica", "Mica"], ["acrylic", "Acrylic"]]} onChange={(b) => saveSettings({ backdrop: b })} />
+            <Seg sm value={settings.backdrop} options={[["", "Solid"], ["clear", "Clear"], ["mica", "Mica"], ["acrylic", "Acrylic"]]} onChange={(b) => saveSettings({ backdrop: b })} />
             <span />
             <div className="hint">
-              Lets your desktop show through the window, tinted by the theme. Mica (Windows 11) is a soft blur of the wallpaper; Acrylic blurs whatever is behind and can lag while dragging on some PCs. Windows XP and Classic stay solid.
+              Lets your desktop show through the window, tinted by the theme. <b>Clear</b> shows what is behind as it is, with no blur, and works on every PC. <b>Mica</b> (Windows 11, a soft blur of the wallpaper) and <b>Acrylic</b> (a blur of whatever is behind) are Windows' own materials: Windows only draws them while RAM is the active window and its Transparency effects are on. Windows XP and Classic stay solid.
+              {(settings.backdrop === "mica" || settings.backdrop === "acrylic") && !snap.transparency_effects && <> <b className="warn">Transparency effects are turned off in Windows on this PC (Settings → Personalization → Colors), so {settings.backdrop === "mica" ? "Mica" : "Acrylic"} shows as a solid colour. Use Clear, or turn that setting on.</b></>}
               {settings.backdrop === "mica" && snap.windows_build > 0 && snap.windows_build < 22000 && <> <b>Mica needs Windows 11; this PC stays solid.</b></>}
               {settings.backdrop !== snap.backdrop && !(settings.backdrop === "mica" && snap.windows_build > 0 && snap.windows_build < 22000) && <> <b>Takes effect when RAM starts again.</b> <a href="#" onClick={(e) => { e.preventDefault(); api.restartApp().catch(() => {}); }}>Restart now</a></>}
             </div>
           </div>
+          {(settings.backdrop !== "" || snap.backdrop !== "") && (
+            <div className="kv">
+              <span>See-through</span>
+              <input type="range" min={20} max={95} step={5} value={115 - settings.backdrop_tint} onChange={(e) => saveSettings({ backdrop_tint: 115 - Number(e.target.value) })} title={`${100 - settings.backdrop_tint}% of the desktop shows through`} />
+              <span />
+              <div className="hint">Further right shows more of the desktop and less of the theme's colour. Text gets harder to read over a busy background.</div>
+            </div>
+          )}
           <Field label="Accent">
             <div className="accent-row">
               <button type="button" className={`accent-dot ${settings.accent == null ? "active" : ""}`} style={{ background: "conic-gradient(#cba6f7,#89b4fa,#a6e3a1,#f9e2af,#f38ba8,#cba6f7)" }} title="Theme default" onClick={() => saveSettings({ accent: null })} />
@@ -196,7 +205,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
           )}
           <div className="kv">
             <span>Check who is in game every</span>
-            <Seg sm value={String(settings.presence_every_secs)} options={[["10", "10 s"], ["15", "15 s"], ["30", "30 s"], ["60", "60 s"]]} onChange={(v) => saveSettings({ presence_every_secs: Number(v) })} />
+            <Seg sm value={String(settings.presence_every_secs)} options={[["10", "10 s"], ["15", "15 s"], ["30", "30 s"], ["45", "45 s"], ["60", "60 s"]]} onChange={(v) => saveSettings({ presence_every_secs: Number(v) })} />
             <span />
             <div className="hint">How often RAM asks Roblox whether each account is online or in a game. It is also asked right before every launch. If Roblox asks RAM to slow down, it waits longer by itself.</div>
           </div>

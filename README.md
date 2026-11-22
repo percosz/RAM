@@ -35,7 +35,7 @@ auto-updater verifies every update against RAM's own release signature.
   username first and your alias and description underneath, a Valid/Invalid
   badge, Robux and Premium. Each row shows whether the account is in a game
   right now (here or on another device), online, or when it was last seen
-  online, checked with Roblox every 15 seconds; launching an account that is
+  online, checked with Roblox every 45 seconds (adjustable); launching an account that is
   already playing asks first. The sidebar and details pane can be resized by
   dragging their dividers. Tick boxes on rows and group headers pick any set
   of accounts; the details pane edits alias, group and description, marks
@@ -120,8 +120,9 @@ auto-updater verifies every update against RAM's own release signature.
   light), Monokai, Everforest, Sakura and a muted Lineage palette. Looks that
   restyle the whole app: Windows XP, Windows Vista (Aero glass), Classic
   (95), Frutiger Aero, Aurora, Ocean, Sunset, Synthwave and Terminal. An
-  optional **window backdrop** (Mica on Windows 11, or Acrylic) lets the
-  desktop show through. Plus an accent colour, corner radius, and four row
+  optional **window backdrop** lets the desktop show through: Clear (no
+  blur, works everywhere), or Windows' Mica and Acrylic materials, with a
+  slider for how see-through it is. Plus an accent colour, corner radius, and four row
   sizes from Compact (one line) to Large.
 - **Tutorial.** A one-minute tour on first launch points at each part of the
   app in turn; skip it at any step and repeat it from the bottom of Settings.

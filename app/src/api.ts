@@ -76,8 +76,10 @@ export interface Settings {
   check_every_hours: number;
   /** Seconds between checks of who is online or in a game. */
   presence_every_secs: number;
-  /** Wanted window backdrop: "" | "mica" | "acrylic" (applies at the next start). */
+  /** Wanted window backdrop: "" | "clear" | "mica" | "acrylic" (applies at the next start). */
   backdrop: string;
+  /** Percent of the theme's colour over the desktop when a backdrop is on. */
+  backdrop_tint: number;
   /** "" follows the Windows default browser; otherwise a browser's full path. */
   browser: string;
   window: unknown;
@@ -148,6 +150,8 @@ export interface Snapshot {
   backdrop: string;
   /** Windows build number (22000 and up is Windows 11); 0 when unknown. */
   windows_build: number;
+  /** Windows' "Transparency effects" setting; without it Mica and Acrylic are solid colours. */
+  transparency_effects: boolean;
 }
 
 export type PresenceKind = "Offline" | "Online" | "InGame" | "InStudio" | "Invisible";

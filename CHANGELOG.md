@@ -4,6 +4,20 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.6.3 (2026-11-22)
+
+### Fixed
+- **The window backdrop was not see-through.** With a backdrop on, RAM gave the window a "fully transparent" background colour; Windows ignores the transparency of a window background and painted it solid black, hiding everything behind. The window now has no background colour at all in that case.
+- The Join Server button could overlap the Username box when the list was narrow; the Follow group now wraps to a second row.
+
+### New
+- **Clear backdrop** (Settings → Appearance → Window backdrop). The window is simply see-through, with no blur. It works on every PC and while RAM is not the active window.
+- **See-through slider** under the backdrop choice: how much of the desktop shows through against the theme's colour.
+- Settings now says so when **Windows' own "Transparency effects" setting is off** (Settings → Personalization → Colors). With it off, Windows draws Mica and Acrylic as a solid colour for every app, and only while a window is active when it is on; Clear does not depend on it.
+
+### Changed
+- "Check who is in game" defaults to every **45 seconds** (10, 15, 30, 45 or 60 in Settings). A copy that already saved another value keeps it.
+
 ## 0.6.2 (2026-11-22)
 
 ### Changed

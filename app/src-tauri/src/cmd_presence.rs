@@ -1,7 +1,7 @@
 //! Who is online or in a game right now (`ram_core::presence`).
 //!
 //! Every account is asked about itself with its own cookie, a few at a
-//! time, every 15 seconds by default (Settings), and again right before a
+//! time, every 45 seconds by default (Settings), and again right before a
 //! launch so the "already in
 //! a game" warning is never based on an old answer. Accounts without a
 //! stored cookie are asked about anonymously in one request. Each time an
@@ -165,7 +165,7 @@ pub fn spawn(app: AppHandle) {
         loop {
             let started = std::time::Instant::now();
             let (_, limited) = check(&app, None);
-            let setting = || app.state::<Shared>().lock().map(|s| u64::from(s.store.settings.presence_every_secs)).unwrap_or(15).clamp(MIN_EVERY_SECS, MAX_EVERY_SECS);
+            let setting = || app.state::<Shared>().lock().map(|s| u64::from(s.store.settings.presence_every_secs)).unwrap_or(45).clamp(MIN_EVERY_SECS, MAX_EVERY_SECS);
             if limited {
                 penalty = (penalty.max(setting()) * 2).min(MAX_BACKOFF_SECS);
                 if let Ok(s) = app.state::<Shared>().lock() {

@@ -591,9 +591,14 @@ pub struct Settings {
     /// Seconds between checks of who is online or in a game.
     #[serde(default = "default_presence_secs")]
     pub presence_every_secs: u32,
-    /// Window backdrop: "" (solid), "mica" or "acrylic". Takes effect at the
-    /// next start, because the window has to be created see-through.
+    /// Window backdrop: "" (solid), "clear", "mica" or "acrylic". Takes
+    /// effect at the next start, because the window has to be created
+    /// see-through.
     pub backdrop: String,
+    /// How much of the theme's colour covers the desktop when a backdrop is
+    /// on, in percent (lower is more see-through).
+    #[serde(default = "default_backdrop_tint")]
+    pub backdrop_tint: u32,
     /// Browser for Open Browser and sign-in: empty follows the Windows
     /// default; otherwise the full path of a Chromium-based browser.
     pub browser: String,
@@ -605,8 +610,12 @@ fn default_rejoin_max() -> u32 {
     3
 }
 
+fn default_backdrop_tint() -> u32 {
+    70
+}
+
 fn default_presence_secs() -> u32 {
-    15
+    45
 }
 
 impl Default for Settings {
@@ -629,6 +638,7 @@ impl Default for Settings {
             check_every_hours: 0,
             presence_every_secs: default_presence_secs(),
             backdrop: String::new(),
+            backdrop_tint: default_backdrop_tint(),
             browser: String::new(),
             window: None,
             last_import_dir: String::new(),

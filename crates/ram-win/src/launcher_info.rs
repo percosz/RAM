@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::ERROR_SUCCESS;
-use windows::Win32::System::Registry::{RegGetValueW, HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+use windows::Win32::System::Registry::{RegGetValueW, HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ};
 
 use crate::util::{from_wide, wide};
 
@@ -34,6 +34,24 @@ pub fn windows_build() -> u32 {
     reg_sz(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", Some("CurrentBuildNumber"))
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0)
+}
+
+/// Whether Windows' "Transparency effects" setting (Settings →
+/// Personalization → Colors) is on. With it off, Windows draws the Mica and
+/// Acrylic materials as a solid colour for every app. Unknown counts as on.
+pub fn transparency_effects() -> bool {
+    reg_dword(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "EnableTransparency").map(|v| v != 0).unwrap_or(true)
+}
+
+fn reg_dword(root: HKEY, subkey: &str, value: &str) -> Option<u32> {
+    let subkey = wide(subkey);
+    let value = wide(value);
+    let mut data = 0u32;
+    let mut bytes = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(root, PCWSTR(subkey.as_ptr()), PCWSTR(value.as_ptr()), RRF_RT_REG_DWORD, None, Some(&mut data as *mut u32 as *mut _), Some(&mut bytes))
+    };
+    (status == ERROR_SUCCESS).then_some(data)
 }
 
 fn reg_sz(root: HKEY, subkey: &str, value: Option<&str>) -> Option<String> {
