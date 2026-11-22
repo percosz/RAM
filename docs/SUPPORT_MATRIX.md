@@ -32,6 +32,10 @@ handler, which is what the "on this PC" notes refer to.
 | Groups, aliases, notes, favorites, Main pin | Verified | No | Main is excluded from Select All (Ctrl+A), from batch launches and from every performance setting. |
 | Row sizes Compact / Normal / Comfortable / Large | Verified | No | Compact screenshotted at the 900×560 minimum. |
 | Auto-rejoin after a disconnect or crash, the way the account last joined | Conditional | **Yes** | The policy (which endings, spacing, cap, reset, fallback target) is unit-tested. The scheduler itself was not exercised with a real Roblox client: no rejoin has been observed end to end. |
+| Presence per account (in game here / elsewhere, online), checked every minute with the account's own cookie | Conditional | **Yes** | Parsing, the signed-in request (CSRF handshake) and error handling are unit-tested, and a live anonymous request returned the documented shape. The signed-in answer for an account that is really in a game was not observed. |
+| Warning before launching an account that is in a game (Launch anyway / Skip / Cancel) | Verified | No | All three choices checked end to end on demo data with a substituted presence answer and launches swallowed. |
+| Last online, recorded by RAM (Roblox's lookup returns 404) | Conditional | — | Only knows about times RAM was running. |
+| Draggable dividers (sidebar, details pane), remembered | Verified | No | Dragging, limits, persistence and double-click reset checked end to end. |
 | Saved places in the launch bar | Verified | No | Saving, the built-in entry and a refused place 0 checked end to end on demo data. |
 | Scheduled sign-in check | Conditional | — | Uses the existing check; the timer was not waited out. |
 | Backup and restore (one password-protected file) | Verified | No | File format unit-tested (round trip, wrong password, tampering, other files). Create, inspect, wrong password and restore checked end to end on demo data with an empty vault; a backup carrying real cookies was not made. |

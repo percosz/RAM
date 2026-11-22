@@ -33,7 +33,11 @@ auto-updater verifies every update against RAM's own release signature.
 
 - **Accounts.** A searchable, groupable list with Roblox headshots, the
   username first and your alias and description underneath, a Valid/Invalid
-  badge, Robux and Premium. Tick boxes on rows and group headers pick any set
+  badge, Robux and Premium. Each row shows whether the account is in a game
+  right now (here or on another device), online, or when it was last seen
+  online, checked with Roblox once a minute; launching an account that is
+  already playing asks first. The sidebar and details pane can be resized by
+  dragging their dividers. Tick boxes on rows and group headers pick any set
   of accounts; the details pane edits alias, group and description, marks
   Main and favourites, and shows how the account was added (cookie only,
   browser sign-in, or login + password). Drag rows to reorder. One click on

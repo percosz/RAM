@@ -7,6 +7,7 @@ mod cmd_browser;
 mod cmd_diag;
 mod cmd_io;
 mod cmd_launch;
+mod cmd_presence;
 mod cmd_update;
 mod cmd_vault;
 mod dto;
@@ -93,6 +94,7 @@ pub fn run() {
             cmd_backup::backup_create,
             cmd_backup::backup_inspect,
             cmd_backup::backup_restore,
+            cmd_presence::presence_check,
             window::set_window_theme,
             window::restart_app,
         ])
@@ -110,6 +112,7 @@ pub fn run() {
                 }
             }
             cmd_diag::spawn_watcher(app.handle().clone());
+            cmd_presence::spawn(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())

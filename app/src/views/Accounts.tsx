@@ -7,6 +7,7 @@ import { api, ago, signInLabel, type Account, type Game } from "../api";
 import { Avatar, Btn, Field, Modal, StatusBadge, Toggle, tone } from "../components";
 import { ContextMenu, type MenuItem } from "../menu";
 import { maskName, useApp } from "../store";
+import { Splitter } from "../splitter";
 import { AddAccountDialog, ConfirmDialog, ImportDialog, RevealCookieDialog } from "../dialogs";
 
 const ROGUE_LINEAGE = 3016661674;
@@ -51,7 +52,24 @@ function usePlaceInfo(placeId: string): { state: "idle" | "loading" | "ok" | "un
 type Dialog =
   | null | { kind: "add" } | { kind: "import" }
   | { kind: "copyCookie"; id: number; what: "cookie" | "password" | "userpass" } | { kind: "remove"; ids: number[] } | { kind: "removeCookie"; id: number }
-  | { kind: "newGroup"; ids: number[] };
+  | { kind: "newGroup"; ids: number[] }
+  | { kind: "busy"; ids: number[]; busy: Array<{ id: number; where: string }>; go: (ids: number[]) => Promise<void> };
+
+/** The row's last column: who is on the account right now, else when it was last online. */
+function seen(a: Account): { text: string; cls: "" | "accent" | "warn" | "good"; title: string } {
+  const p = a.presence;
+  if (a.client === "Running") return { text: "in game", cls: "accent", title: "In a game on this PC, in a client RAM is tracking." };
+  if (p?.kind === "InGame") return { text: "in game", cls: "warn", title: `In a game right now${p.location ? ` (${p.location})` : ""}, but not in a client RAM is tracking: another device, or started outside RAM.` };
+  if (p?.kind === "InStudio") return { text: "studio", cls: "warn", title: "In Roblox Studio right now." };
+  if (p?.kind === "Online" || p?.kind === "Invisible") return { text: "online", cls: "good", title: "Online on the website or in the app right now, not in a game." };
+  const when = a.last_online ?? a.last_used;
+  return {
+    text: ago(when), cls: "",
+    title: when
+      ? `Last seen online ${new Date(when * 1000).toLocaleString()}. Roblox no longer reports this, so RAM records it itself while it is running.`
+      : "RAM has not seen this account online yet.",
+  };
+}
 
 interface DragState { ids: number[]; startX: number; startY: number; active: boolean; over: number | null; after: boolean; }
 
@@ -65,6 +83,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
   const [follow, setFollow] = useState("");
   const [menu, setMenu] = useState<null | { x: number; y: number; ids: number[] }>(null);
   const [placesMenu, setPlacesMenu] = useState<null | { x: number; y: number }>(null);
+  const [asking, setAsking] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const suppressClick = useRef(false);
@@ -140,18 +159,38 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
     return false;
   };
 
+  // Before a launch: ask Roblox, right now, whether any of these accounts is
+  // already in a game (here or anywhere else), and let the user decide.
+  // Launching signs the account in again and ends the other session.
+  const guarded = async (ids: number[], go: (ids: number[]) => Promise<void>) => {
+    if (asking) return;
+    const here = accounts.filter((a) => ids.includes(a.id) && a.client === "Running").map((a) => ({ id: a.id, where: "on this PC" }));
+    let elsewhere: Array<{ id: number; where: string }> = [];
+    setAsking(true);
+    try {
+      elsewhere = (await api.presenceCheck(ids))
+        .filter((p) => p.kind === "InGame" && !here.some((h) => h.id === p.id))
+        .map((p) => ({ id: p.id, where: p.location ? `${p.location}, on another device or outside RAM` : "on another device or outside RAM" }));
+    } catch { /* no answer from Roblox: do not hold the launch up */ }
+    finally { setAsking(false); }
+    const busy = [...here, ...elsewhere];
+    if (!busy.length) { await go(ids); return; }
+    setDialog({ kind: "busy", ids, busy, go });
+  };
   const join = async (ids: number[] = selected) => {
     if (!ids.length) { toast("Select an account to launch.", "warn"); return; }
     const pid = Number(placeId.trim().match(/\d{3,}/)?.[0] ?? 0);
     if (!pid) { toast("Enter a place ID.", "warn"); return; }
     if (needCookieVault()) return;
-    try { await api.launch(ids, pid, jobId.trim() || null); } catch (e) { toast(String(e), "bad"); }
+    const job = jobId.trim() || null;
+    await guarded(ids, async (list) => { try { await api.launch(list, pid, job); } catch (e) { toast(String(e), "bad"); } });
   };
   const doFollow = async () => {
     if (!selected.length) { toast("Select an account to launch.", "warn"); return; }
     if (!follow.trim()) { toast("Enter a username to follow.", "warn"); return; }
     if (needCookieVault()) return;
-    try { await api.follow(selected, follow); } catch (e) { toast(String(e), "bad"); }
+    const who = follow;
+    await guarded(selected, async (list) => { try { await api.follow(list, who); } catch (e) { toast(String(e), "bad"); } });
   };
   const openBrowser = async (id: number) => {
     try { const note = await api.openBrowser(id); if (note) toast(note); } catch (e) { toast(String(e), "bad"); }
@@ -367,14 +406,17 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
                       <input type="checkbox" checked={on} onChange={() => toggle(a)} />
                       <span className="box" />
                     </label>
-                    <Avatar name={hide ? a.username.slice(0, 1) : a.username} seed={a.id} src={hide ? null : a.avatar_url} />
+                    <span className="av-wrap" title={seen(a).cls ? seen(a).title : undefined}>
+                      <Avatar name={hide ? a.username.slice(0, 1) : a.username} seed={a.id} src={hide ? null : a.avatar_url} />
+                      {seen(a).cls && <i className={`presence-dot ${seen(a).cls}`} />}
+                    </span>
                     <div className="grow" style={{ minWidth: 0 }}>
                       <div className="name ellipsis">{nameOf(a.username)}{a.is_main && <span className="main-tag">MAIN</span>}{a.favorite && <Star style={{ width: 12, height: 12, marginLeft: 6, color: "var(--warn)", verticalAlign: "-1px" }} />}{a.full_quality && !a.is_main && <Gauge style={{ width: 12, height: 12, marginLeft: 6, color: "var(--muted)", verticalAlign: "-1px" }} />}</div>
                       <div className={`sub ellipsis ${ls?.state === "Failed" ? "bad" : ""}`} title={sub}>{sub}</div>
                     </div>
                     <div><StatusBadge a={a} /></div>
-                    <div className="right">{a.client === "Running" ? <span className="accent">● in game</span> : a.robux != null ? <span>R$ {hide ? "•••" : a.robux.toLocaleString()}</span> : a.has_cookie ? <span title="Cookie stored"><KeyRound style={{ width: 13, height: 13 }} /></span> : ""}</div>
-                    <div className="right">{ago(a.last_used)}</div>
+                    <div className="right">{a.robux != null ? <span>R$ {hide ? "•••" : a.robux.toLocaleString()}</span> : a.has_cookie ? <span title="Cookie stored"><KeyRound style={{ width: 13, height: 13 }} /></span> : ""}</div>
+                    <div className="right" title={seen(a).title}>{seen(a).cls ? <span className={seen(a).cls}>{seen(a).text}</span> : seen(a).text}</div>
                     <div className="right">{a.premium ? <Crown style={{ width: 14, height: 14, color: "var(--warn)" }} /> : null}</div>
                   </div>
                 );
@@ -384,6 +426,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
         })}
       </div>
 
+      <Splitter kind="details" />
       <aside className="details" data-tour="details">
         {one ? (
           <Details a={one} onOpenBrowser={() => openBrowser(one.id)} onCheck={() => check([one.id])} onRemove={() => setDialog({ kind: "remove", ids: [one.id] })} />
@@ -397,16 +440,35 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
           <Btn icon title="Saved places" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPlacesMenu({ x: r.left, y: r.top - 6 }); }}><Bookmark /></Btn>
           <input className="input place mono" placeholder="Place ID" value={placeId} onChange={(e) => setPlaceId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && join()} title="Place ID or game link" />
           <input className="input job mono" placeholder="Job ID" value={jobId} onChange={(e) => setJobId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && join()} />
-          <Btn kind="primary" onClick={() => join()} disabled={!selected.length || place.state === "unknown"} title={selected.length ? `Launch ${selected.length} selected` : "Select accounts to launch"}><Play />Join Server</Btn>
+          <Btn kind="primary" onClick={() => join()} disabled={!selected.length || place.state === "unknown" || asking} title={selected.length ? `Launch ${selected.length} selected` : "Select accounts to launch"}><Play />Join Server</Btn>
         </div>
         <div className="lgroup">
           <input className="input user" placeholder="Username" value={follow} onChange={(e) => setFollow(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doFollow()} />
-          <Btn onClick={doFollow} disabled={!selected.length} title="Join the game this user is in"><UserPlus />Follow</Btn>
+          <Btn onClick={doFollow} disabled={!selected.length || asking} title="Join the game this user is in"><UserPlus />Follow</Btn>
         </div>
         <div className="lhint">{placeHint}{selected.length > 0 && <span className="muted"> · {selected.length} selected</span>}</div>
       </div>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.ids)} onClose={() => setMenu(null)} />}
+      {dialog?.kind === "busy" && (() => {
+        const d = dialog;
+        const rest = d.ids.filter((id) => !d.busy.some((b) => b.id === id));
+        const one = d.busy.length === 1;
+        return (
+          <Modal title={one ? "This account is in a game" : `${d.busy.length} accounts are in a game`} onClose={() => setDialog(null)}
+            footer={<>
+              <Btn onClick={() => setDialog(null)}>Cancel</Btn>
+              {rest.length > 0 && <Btn onClick={() => { setDialog(null); void d.go(rest); }}>Skip {one ? "it" : "them"}, launch the other {rest.length}</Btn>}
+              <Btn kind="primary" onClick={() => { setDialog(null); void d.go(d.ids); }}>Launch anyway</Btn>
+            </>}>
+            <p style={{ margin: 0 }}>{one ? "This account is" : "These accounts are"} being played right now:</p>
+            <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+              {d.busy.map((b) => <li key={b.id}><b>{nameOf(accounts.find((a) => a.id === b.id)?.username ?? "")}</b> <span className="muted">· {b.where}</span></li>)}
+            </ul>
+            <p className="muted" style={{ margin: 0 }}>Launching {one ? "it" : "them"} here signs the account in again, and Roblox disconnects the session that is already playing.</p>
+          </Modal>
+        );
+      })()}
       {placesMenu && <ContextMenu x={placesMenu.x} y={placesMenu.y} items={placeItems} onClose={() => setPlacesMenu(null)} />}
       {dialog?.kind === "add" && <AddAccountDialog onClose={() => setDialog(null)} onImport={() => setDialog({ kind: "import" })} />}
       {dialog?.kind === "import" && <ImportDialog onClose={() => setDialog(null)} />}
@@ -453,7 +515,11 @@ function Details({ a, onOpenBrowser, onCheck, onRemove }: { a: Account; onOpenBr
         <span className={`badge ${t}`} title={a.sign_in.detail}><span className="dot" />{a.checking ? "Checking…" : signInLabel(a.sign_in.state)}{a.sign_in.last_check ? ` · ${ago(a.sign_in.last_check)}` : ""}</span>
         {a.robux != null && <span className="badge accent">R$ {hide ? "•••" : a.robux.toLocaleString()}</span>}
         {a.premium && <span className="badge warn">Premium</span>}
-        {a.client === "Running" && <span className="badge good">In game</span>}
+        {a.client === "Running" ? <span className="badge good" title={seen(a).title}>In game here</span>
+          : a.presence?.kind === "InGame" ? <span className="badge warn" title={seen(a).title}>In game elsewhere{a.presence.location ? ` · ${a.presence.location}` : ""}</span>
+          : a.presence?.kind === "InStudio" ? <span className="badge warn" title={seen(a).title}>In Studio</span>
+          : a.presence?.kind === "Online" || a.presence?.kind === "Invisible" ? <span className="badge good" title={seen(a).title}>Online</span>
+          : (a.last_online ?? a.last_used) ? <span className="badge muted" title={seen(a).title}>last online {seen(a).text}</span> : null}
         {!a.has_cookie ? <span className="badge muted">no cookie</span>
           : a.has_password ? <span className="badge muted" title="Signed in with username and password. The password is saved in the vault, so both it and the cookie can be copied (right-click → Copy)."><KeyRound style={{ width: 11, height: 11 }} />login + password</span>
           : a.method === "Login" ? <span className="badge muted" title="Signed in through the browser. Only the session cookie is stored; no password was saved."><KeyRound style={{ width: 11, height: 11 }} />browser sign-in</span>

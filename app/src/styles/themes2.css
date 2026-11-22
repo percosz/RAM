@@ -149,3 +149,20 @@
 
 /* A boxed note inside a dialog (what a restore will replace). */
 .callout { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius: var(--radius-sm); background: var(--warn-wash); font-size: 13px; line-height: 1.45; }
+
+/* Draggable dividers (sidebar | content, list | details). */
+.splitter { width: 7px; z-index: 6; cursor: col-resize; background: transparent; transition: background-color .12s; touch-action: none; }
+.splitter:hover, .splitter.dragging { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.splitter-sidebar { grid-column: 1; grid-row: 1 / span 2; justify-self: end; margin-right: -4px; }
+.splitter-details { grid-column: 2; grid-row: 2 / span 2; justify-self: start; margin-left: -4px; }
+/* Both sit in column 1, so the sidebar's column is stated (it used to be auto-placed). */
+.sidebar { grid-column: 1; min-width: 0; overflow: hidden; }
+.nav, .brand b, .vault-pill, .update-pill { white-space: nowrap; overflow: hidden; }
+
+/* Who is on an account right now: a dot on its avatar, visible at every
+   list width (the status column hides when the list is narrow). */
+.av-wrap { position: relative; display: inline-grid; width: var(--avatar); height: var(--avatar); }
+.presence-dot { position: absolute; right: -3px; bottom: -3px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--bg); background: var(--good); }
+.presence-dot.accent { background: var(--accent); }
+.presence-dot.warn { background: var(--warn); }
+:root[data-density="compact"] .presence-dot { width: 9px; height: 9px; right: -2px; bottom: -2px; }

@@ -179,6 +179,10 @@ pub struct Account {
     pub sign_in: SignInRecord,
     pub created: i64,
     pub last_used: Option<i64>,
+    /// When RAM last saw this account online (in Roblox's presence, or as
+    /// a client running here). Roblox no longer reports this itself.
+    #[serde(default)]
+    pub last_online: Option<i64>,
     /// Where this entry came from, for repeat-safe imports.
     pub import_key: Option<String>,
     /// Display name reported by Roblox at the last cookie check.
@@ -237,6 +241,7 @@ impl Default for Account {
             sign_in: SignInRecord::default(),
             created: 0,
             last_used: None,
+            last_online: None,
             import_key: None,
             display_name: String::new(),
             robux: None,

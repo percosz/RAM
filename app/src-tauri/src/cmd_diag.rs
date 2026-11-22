@@ -506,6 +506,9 @@ fn tick(app: &AppHandle) {
         }
         if let Some(id) = w.account {
             seen_exited.push(id);
+            if let Some(a) = s.store.account_mut(id) {
+                a.last_online = Some(t);
+            }
         }
         s.diag.closing.retain(|p| *p != key.pid);
         if let Some(b) = &w.browser_tracker_id {

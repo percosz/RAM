@@ -28,6 +28,8 @@ pub struct AppState {
     pub diag: crate::cmd_diag::DiagState,
     /// The username:password sign-in queue.
     pub signin_queue: crate::cmd_add::SignInQueue,
+    /// Presence as last answered by Roblox, per account (not saved).
+    pub presence: std::collections::HashMap<AccountId, crate::cmd_presence::PresenceInfo>,
     /// The backdrop the window was created with ("", "mica" or "acrylic").
     pub backdrop: &'static str,
     /// Windows build number, 0 when unknown.
@@ -108,6 +110,7 @@ impl AppState {
             checking: HashSet::new(),
             diag: Default::default(),
             signin_queue: Default::default(),
+            presence: Default::default(),
             backdrop: "",
             windows_build: 0,
         };

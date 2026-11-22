@@ -457,6 +457,7 @@ fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model
                                 let t = now();
                                 if let Some(a) = s.store.account_mut(id) {
                                     a.last_used = Some(t);
+                                    a.last_online = Some(t);
                                 }
                                 if model_target.place_id().unwrap_or(0) != 0 {
                                     s.store.push_recent(RecentLaunch { account: id, target: model_target.clone(), at: t });

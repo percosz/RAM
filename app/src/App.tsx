@@ -9,6 +9,7 @@ import { ClientsView } from "./views/Clients";
 import { DiagnosticsView } from "./views/Diagnostics";
 import { UpdateDialog, WhatsNewDialog } from "./views/Updates";
 import { Tour } from "./views/Tour";
+import { Splitter, restoreSplits } from "./splitter";
 import { VaultUnlockDialog } from "./dialogs";
 import "./styles/ui.css";
 import "./styles/app.css";
@@ -119,6 +120,7 @@ function Shell() {
         )}
         {vaultPill}
       </aside>
+      <Splitter kind="sidebar" />
       <main className="content">
         {view === "accounts" && <AccountsView onNeedUnlock={() => setUnlock(true)} />}
         {view === "clients" && <ClientsView />}
@@ -146,6 +148,8 @@ function Shell() {
     </div>
   );
 }
+
+restoreSplits();
 
 export default function App() {
   return (

@@ -15,6 +15,7 @@ pub mod model;
 pub mod oauth;
 pub mod perf;
 pub mod platform;
+pub mod presence;
 pub mod redact;
 pub mod rejoin;
 pub mod roblox;

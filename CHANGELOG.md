@@ -4,6 +4,14 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.6.1 (2026-11-22)
+
+### New
+- **Who is on an account right now.** RAM asks Roblox about every account once a minute, each with its own cookie, and shows it in the list: **in game** (accent when it is a client RAM started on this PC, amber when it is somewhere else: another device, or started outside RAM), **online**, or **studio**. A dot on the avatar shows the same thing at any list width, and the details pane names the game when Roblox shares it.
+- **A warning before launching an account that is already playing.** Join Server and Follow ask Roblox again at that moment. If an account is in a game, RAM says which and where, and offers **Launch anyway**, **Skip it** (launch the others) or **Cancel**. Launching signs the account in again, which disconnects the session that is already playing. Auto-rejoin does not ask.
+- **Last online instead of last launched here.** The time in each row is now when the account was last seen online. Roblox has removed its last-online lookup, so RAM records this itself from the presence checks and from clients running here; it is accurate from now on for as long as RAM is running, and falls back to the last launch from RAM until then.
+- **Draggable dividers.** Drag the line between the sidebar and the list, or between the list and the details pane, to resize them. The widths are remembered; double-click a divider for the default.
+
 ## 0.6.0 (2026-11-22)
 
 ### New

@@ -30,6 +30,10 @@ export interface Account {
   has_cookie: boolean;
   checking: boolean;
   last_used: number | null;
+  /** When RAM last saw the account online (Roblox's presence, or a client here). */
+  last_online: number | null;
+  /** Roblox's answer about the account right now, when there is one. */
+  presence: PresenceView | null;
   robux: number | null;
   premium: boolean | null;
   avatar_url: string | null;
@@ -144,6 +148,9 @@ export interface Snapshot {
   windows_build: number;
 }
 
+export type PresenceKind = "Offline" | "Online" | "InGame" | "InStudio" | "Invisible";
+export interface PresenceView { id: number; kind: PresenceKind; location: string; place_id: number | null; checked_at: number; }
+
 export interface BackupInfo { created: number; app_version: string; accounts: number; cookies: number; passwords: number; }
 
 export interface Adopted { account: Account; added: boolean; }
@@ -216,6 +223,9 @@ export const api = {
   backupInspect: (path: string, password: string) => invoke<BackupInfo>("backup_inspect", { path, password }),
   backupRestore: (path: string, password: string) => invoke<string>("backup_restore", { path, password }),
   setWindowTheme: (dark: boolean) => invoke<void>("set_window_theme", { dark }),
+  /** Asks Roblox right now who among `ids` is online or in a game. */
+  presenceCheck: (ids: number[]) => invoke<PresenceView[]>("presence_check", { ids }),
+  onPresence: (cb: () => void): Promise<UnlistenFn> => listen("presence-changed", () => cb()),
   restartApp: () => invoke<void>("restart_app"),
   setGraphics: (graphics: GraphicsSettings) => invoke<GraphicsSettings>("set_graphics", { graphics }),
   openDataFolder: () => invoke<string>("open_data_folder"),

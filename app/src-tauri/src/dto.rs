@@ -21,6 +21,10 @@ pub struct AccountView {
     pub has_cookie: bool,
     pub checking: bool,
     pub last_used: Option<i64>,
+    /// When RAM last saw the account online (presence, or a client here).
+    pub last_online: Option<i64>,
+    /// Roblox's answer about the account right now, when there is one.
+    pub presence: Option<crate::cmd_presence::PresenceView>,
     pub robux: Option<i64>,
     pub premium: Option<bool>,
     pub avatar_url: Option<String>,
@@ -134,6 +138,8 @@ pub fn account_view(s: &AppState, id: AccountId) -> Option<AccountView> {
         has_cookie: s.vault.has_secret(a.id),
         checking: s.checking.contains(&a.id),
         last_used: a.last_used,
+        last_online: a.last_online,
+        presence: s.presence.get(&a.id).map(|i| crate::cmd_presence::view(a.id, i)),
         robux: a.robux,
         premium: a.premium,
         avatar_url: a.avatar_url.clone(),

@@ -180,6 +180,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (pending != null) return;
       pending = window.setTimeout(() => { pending = null; void refresh(); }, 120);
     }).then((u) => unsubs.push(u));
+    api.onPresence(() => {
+      if (pending != null) return;
+      pending = window.setTimeout(() => { pending = null; void refresh(); }, 120);
+    }).then((u) => unsubs.push(u));
     // A launch line is cleared when the client is seen (Running) or gone
     // (Exited), and "Client starting…" never outlives two minutes.
     const expiry = new Map<number, number>();
