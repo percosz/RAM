@@ -74,6 +74,8 @@ export interface Settings {
   rejoin_max: number;
   /** Re-check every stored sign-in this often; 0 is off. */
   check_every_hours: number;
+  /** Seconds between checks of who is online or in a game. */
+  presence_every_secs: number;
   /** Wanted window backdrop: "" | "mica" | "acrylic" (applies at the next start). */
   backdrop: string;
   /** "" follows the Windows default browser; otherwise a browser's full path. */

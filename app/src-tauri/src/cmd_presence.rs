@@ -1,7 +1,8 @@
 //! Who is online or in a game right now (`ram_core::presence`).
 //!
 //! Every account is asked about itself with its own cookie, a few at a
-//! time, once a minute, and again right before a launch so the "already in
+//! time, every 15 seconds by default (Settings), and again right before a
+//! launch so the "already in
 //! a game" warning is never based on an old answer. Accounts without a
 //! stored cookie are asked about anonymously in one request. Each time an
 //! account is seen online, that moment becomes its last-online time (Roblox
@@ -15,8 +16,9 @@ use serde::Serialize;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// Seconds between background rounds.
-const EVERY_SECS: u64 = 60;
+/// Bounds for the interval between background rounds (the setting).
+const MIN_EVERY_SECS: u64 = 5;
+const MAX_EVERY_SECS: u64 = 300;
 /// Longest pause after Roblox asks RAM to slow down.
 const MAX_BACKOFF_SECS: u64 = 600;
 /// Accounts asked at the same time.
@@ -157,16 +159,25 @@ pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         // Let the window and the start-up sign-in checks go first.
         std::thread::sleep(Duration::from_secs(4));
-        let mut wait = EVERY_SECS;
+        // Extra seconds added after Roblox asks RAM to slow down; halved
+        // again by every round that goes through.
+        let mut penalty: u64 = 0;
         loop {
+            let started = std::time::Instant::now();
             let (_, limited) = check(&app, None);
-            wait = if limited { (wait * 2).min(MAX_BACKOFF_SECS) } else { EVERY_SECS };
+            let setting = || app.state::<Shared>().lock().map(|s| u64::from(s.store.settings.presence_every_secs)).unwrap_or(15).clamp(MIN_EVERY_SECS, MAX_EVERY_SECS);
             if limited {
+                penalty = (penalty.max(setting()) * 2).min(MAX_BACKOFF_SECS);
                 if let Ok(s) = app.state::<Shared>().lock() {
-                    s.log.warn(&format!("presence: Roblox asked to slow down; next check in {wait} s"));
+                    s.log.warn(&format!("presence: Roblox asked to slow down; waiting {penalty} s longer"));
                 }
+            } else {
+                penalty /= 2;
             }
-            std::thread::sleep(Duration::from_secs(wait));
+            // Sleep in short steps so a changed setting applies at once.
+            while started.elapsed().as_secs() < setting() + penalty {
+                std::thread::sleep(Duration::from_millis(500));
+            }
         }
     });
 }

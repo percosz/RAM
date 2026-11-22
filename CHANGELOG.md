@@ -4,6 +4,11 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.6.2 (2026-11-22)
+
+### Changed
+- **In game / online updates every 15 seconds** instead of once a minute, and the interval is a setting (Settings → Launching → Check who is in game every: 10, 15, 30 or 60 seconds). If Roblox asks RAM to slow down, RAM waits longer by itself and speeds back up afterwards.
+
 ## 0.6.1 (2026-11-22)
 
 ### New

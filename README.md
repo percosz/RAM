@@ -35,7 +35,7 @@ auto-updater verifies every update against RAM's own release signature.
   username first and your alias and description underneath, a Valid/Invalid
   badge, Robux and Premium. Each row shows whether the account is in a game
   right now (here or on another device), online, or when it was last seen
-  online, checked with Roblox once a minute; launching an account that is
+  online, checked with Roblox every 15 seconds; launching an account that is
   already playing asks first. The sidebar and details pane can be resized by
   dragging their dividers. Tick boxes on rows and group headers pick any set
   of accounts; the details pane edits alias, group and description, marks

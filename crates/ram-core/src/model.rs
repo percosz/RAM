@@ -588,6 +588,9 @@ pub struct Settings {
     pub rejoin_max: u32,
     /// Re-check every stored sign-in this often; 0 is off.
     pub check_every_hours: u32,
+    /// Seconds between checks of who is online or in a game.
+    #[serde(default = "default_presence_secs")]
+    pub presence_every_secs: u32,
     /// Window backdrop: "" (solid), "mica" or "acrylic". Takes effect at the
     /// next start, because the window has to be created see-through.
     pub backdrop: String,
@@ -600,6 +603,10 @@ pub struct Settings {
 
 fn default_rejoin_max() -> u32 {
     3
+}
+
+fn default_presence_secs() -> u32 {
+    15
 }
 
 impl Default for Settings {
@@ -620,6 +627,7 @@ impl Default for Settings {
             auto_rejoin: false,
             rejoin_max: default_rejoin_max(),
             check_every_hours: 0,
+            presence_every_secs: default_presence_secs(),
             backdrop: String::new(),
             browser: String::new(),
             window: None,

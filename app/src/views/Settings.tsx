@@ -195,6 +195,12 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             </div>
           )}
           <div className="kv">
+            <span>Check who is in game every</span>
+            <Seg sm value={String(settings.presence_every_secs)} options={[["10", "10 s"], ["15", "15 s"], ["30", "30 s"], ["60", "60 s"]]} onChange={(v) => saveSettings({ presence_every_secs: Number(v) })} />
+            <span />
+            <div className="hint">How often RAM asks Roblox whether each account is online or in a game. It is also asked right before every launch. If Roblox asks RAM to slow down, it waits longer by itself.</div>
+          </div>
+          <div className="kv">
             <span>Check sign-ins automatically</span>
             <Seg sm value={String(settings.check_every_hours)} options={[["0", "Off"], ["1", "1 h"], ["3", "3 h"], ["6", "6 h"], ["12", "12 h"]]} onChange={(v) => saveSettings({ check_every_hours: Number(v) })} />
             <span />
