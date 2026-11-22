@@ -28,6 +28,10 @@ pub struct AppState {
     pub diag: crate::cmd_diag::DiagState,
     /// The username:password sign-in queue.
     pub signin_queue: crate::cmd_add::SignInQueue,
+    /// The backdrop the window was created with ("", "mica" or "acrylic").
+    pub backdrop: &'static str,
+    /// Windows build number, 0 when unknown.
+    pub windows_build: u32,
 }
 
 pub type Shared = Mutex<AppState>;
@@ -104,6 +108,8 @@ impl AppState {
             checking: HashSet::new(),
             diag: Default::default(),
             signin_queue: Default::default(),
+            backdrop: "",
+            windows_build: 0,
         };
         state.apply_multi_instance();
         state.restore_client_settings();

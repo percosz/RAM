@@ -4,7 +4,7 @@ import { open as pickDialog } from "@tauri-apps/plugin-dialog";
 import { api, type BrowserChoice, type GraphicsSettings, type Msaa, type RenderMode, type Texture, type ThemeKind } from "../api";
 import { Btn, Field, Toggle } from "../components";
 import { FIXED_CORNERS, useApp } from "../store";
-import { ChangePasswordDialog, ConfirmDialog, ImportDialog, VaultSetupDialog } from "../dialogs";
+import { BackupDialog, ChangePasswordDialog, ConfirmDialog, ImportDialog, RestoreDialog, VaultSetupDialog } from "../dialogs";
 
 const THEMES: Array<{ id: ThemeKind; name: string; bg: string; fg: string }> = [
   { id: "System", name: "System", bg: "#1e1f22", fg: "#f5f5f4" },
@@ -26,6 +26,22 @@ const THEMES: Array<{ id: ThemeKind; name: string; bg: string; fg: string }> = [
   { id: "WindowsXp", name: "Windows XP", bg: "#ece9d8", fg: "#245edb" },
   { id: "WindowsVista", name: "Windows Vista", bg: "#cfe0f3", fg: "#2a7fd6" },
   { id: "Classic", name: "Classic (95)", bg: "#c0c0c0", fg: "#000080" },
+  { id: "OneDark", name: "One Dark", bg: "#282c34", fg: "#61afef" },
+  { id: "SolarizedDark", name: "Solarized Dark", bg: "#002b36", fg: "#268bd2" },
+  { id: "SolarizedLight", name: "Solarized Light", bg: "#fdf6e3", fg: "#268bd2" },
+  { id: "Monokai", name: "Monokai", bg: "#272822", fg: "#a6e22e" },
+  { id: "Everforest", name: "Everforest", bg: "#2d353b", fg: "#a7c080" },
+  { id: "Sakura", name: "Sakura", bg: "#fff5f8", fg: "#e0568c" },
+  { id: "Ocean", name: "Ocean", bg: "#061624", fg: "#38bdf8" },
+  { id: "Sunset", name: "Sunset", bg: "#6d2760", fg: "#ffb454" },
+  { id: "FrutigerAero", name: "Frutiger Aero", bg: "#bfe9fb", fg: "#3fba4f" },
+  { id: "Terminal", name: "Terminal", bg: "#050805", fg: "#39ff14" },
+];
+/** The picker's sections, in order. */
+const THEME_GROUPS: Array<[string, ThemeKind[]]> = [
+  ["Basics", ["System", "Light", "Dark", "Midnight"]],
+  ["Palettes", ["Mocha", "Macchiato", "Frappe", "Latte", "Nord", "Dracula", "Gruvbox", "RosePine", "Lineage", "TokyoNight", "OneDark", "SolarizedDark", "SolarizedLight", "Monokai", "Everforest", "Sakura"]],
+  ["Looks", ["Aurora", "Ocean", "Sunset", "Synthwave", "FrutigerAero", "WindowsVista", "WindowsXp", "Classic", "Terminal"]],
 ];
 const ACCENTS = [0xcba6f7, 0x89b4fa, 0x94e2d5, 0xa6e3a1, 0xf9e2af, 0xfab387, 0xf38ba8, 0xeb6f92, 0xf5c2e7, 0x5b9be0];
 
@@ -72,7 +88,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
   const [bwBusy, setBwBusy] = useState(false);
   useEffect(() => { api.listBrowsers().then(setBrowsers).catch(() => {}); }, []);
   useEffect(() => { if (snap) setBw(snap.limits.bandwidth_kbps ? String(snap.limits.bandwidth_kbps) : ""); }, [snap?.limits.bandwidth_kbps]);
-  const [dlg, setDlg] = useState<null | "setup" | "change" | "removeVault" | "import">(null);
+  const [dlg, setDlg] = useState<null | "setup" | "change" | "removeVault" | "import" | "backup" | "restore">(null);
   const [exportCookies, setExportCookies] = useState(false);
   const [checkMsg, setCheckMsg] = useState("");
   const [flagsText, setFlagsText] = useState<string | null>(null);
@@ -114,12 +130,27 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
       <section className="card">
         <div className="card-h">Appearance</div>
         <div className="card-b">
-          <div className="theme-grid">
-            {THEMES.map((t) => (
-              <button key={t.id} type="button" className={`theme-chip ${settings.theme === t.id ? "active" : ""}`} onClick={() => saveSettings({ theme: t.id })}>
-                <span className="sw"><i style={{ background: t.bg }} /><i style={{ background: t.fg }} /></span>{t.name}
-              </button>
-            ))}
+          {THEME_GROUPS.map(([group, ids]) => (
+            <div key={group} style={{ display: "contents" }}>
+              <div className="theme-group">{group}</div>
+              <div className="theme-grid">
+                {ids.map((id) => THEMES.find((t) => t.id === id)!).map((t) => (
+                  <button key={t.id} type="button" className={`theme-chip ${settings.theme === t.id ? "active" : ""}`} onClick={() => saveSettings({ theme: t.id })}>
+                    <span className="sw"><i style={{ background: t.bg }} /><i style={{ background: t.fg }} /></span>{t.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="kv">
+            <span>Window backdrop</span>
+            <Seg sm value={settings.backdrop} options={[["", "Solid"], ["mica", "Mica"], ["acrylic", "Acrylic"]]} onChange={(b) => saveSettings({ backdrop: b })} />
+            <span />
+            <div className="hint">
+              Lets your desktop show through the window, tinted by the theme. Mica (Windows 11) is a soft blur of the wallpaper; Acrylic blurs whatever is behind and can lag while dragging on some PCs. Windows XP and Classic stay solid.
+              {settings.backdrop === "mica" && snap.windows_build > 0 && snap.windows_build < 22000 && <> <b>Mica needs Windows 11; this PC stays solid.</b></>}
+              {settings.backdrop !== snap.backdrop && !(settings.backdrop === "mica" && snap.windows_build > 0 && snap.windows_build < 22000) && <> <b>Takes effect when RAM starts again.</b> <a href="#" onClick={(e) => { e.preventDefault(); api.restartApp().catch(() => {}); }}>Restart now</a></>}
+            </div>
           </div>
           <Field label="Accent">
             <div className="accent-row">
@@ -153,6 +184,22 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             <input className="input" type="number" min={0} max={120} value={settings.launch_spacing_secs} onChange={(e) => saveSettings({ launch_spacing_secs: Math.max(0, Math.min(120, Number(e.target.value) || 0)) })} />
           </div>
           <Toggle checked={settings.include_main_in_batch} onChange={(c) => saveSettings({ include_main_in_batch: c })} label="Include Main in Select All" />
+          <Toggle checked={settings.auto_rejoin} onChange={(c) => saveSettings({ auto_rejoin: c })} label="Rejoin when a client is disconnected or crashes"
+            hint="Launches the alt again the way it last joined: the same server, the same place, or the user it followed. If that does not get it back in, it goes to the place instead. Not when you close a client yourself, not when another sign-in replaced it, and never Main." />
+          {settings.auto_rejoin && (
+            <div className="kv">
+              <span>Rejoin attempts</span>
+              <Seg sm value={String(settings.rejoin_max)} options={[["1", "1"], ["3", "3"], ["5", "5"], ["10", "10"]]} onChange={(v) => saveSettings({ rejoin_max: Number(v) })} />
+              <span />
+              <div className="hint">Waits 10 s before the first, then 30 s, 90 s and longer. A client that stays up for 10 minutes resets the count.</div>
+            </div>
+          )}
+          <div className="kv">
+            <span>Check sign-ins automatically</span>
+            <Seg sm value={String(settings.check_every_hours)} options={[["0", "Off"], ["1", "1 h"], ["3", "3 h"], ["6", "6 h"], ["12", "12 h"]]} onChange={(v) => saveSettings({ check_every_hours: Number(v) })} />
+            <span />
+            <div className="hint">Re-checks every stored cookie on that schedule and tells you which accounts need signing in again.</div>
+          </div>
           <div className="kv">
             <span>Browser</span>
             <select className="select" value={settings.browser} onChange={(e) => saveSettings({ browser: e.target.value })}>
@@ -299,6 +346,8 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
         <div className="card-b">
           <div className="row"><Btn onClick={() => setDlg("import")}>Import from AccountData.json…</Btn><Btn onClick={exportNow}>Export AccountData.json…</Btn></div>
           <Toggle checked={exportCookies} onChange={setExportCookies} label="Include cookies in the export (DPAPI-encrypted, this PC only)" />
+          <div className="row"><Btn onClick={() => setDlg("backup")}>Back up everything…</Btn><Btn onClick={() => setDlg("restore")}>Restore from a backup…</Btn></div>
+          <div className="hint">A backup is one file with your accounts, settings, cookies and saved passwords, encrypted with a password you choose. It works on any PC.</div>
           <div className="row"><Btn kind="ghost" onClick={() => api.openDataFolder().catch((e) => toast(String(e), "bad"))}>Open data folder</Btn><span className="hint ellipsis">{snap.data_dir}</span></div>
         </div>
       </section>
@@ -327,6 +376,8 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
       {dlg === "setup" && <VaultSetupDialog onClose={() => { setDlg(null); void refresh(); }} />}
       {dlg === "change" && <ChangePasswordDialog onClose={() => setDlg(null)} />}
       {dlg === "import" && <ImportDialog onClose={() => setDlg(null)} />}
+      {dlg === "backup" && <BackupDialog onClose={() => setDlg(null)} />}
+      {dlg === "restore" && <RestoreDialog onClose={() => { setDlg(null); void refresh(); }} />}
       {dlg === "removeVault" && <ConfirmDialog danger title="Remove vault" text={`Delete the vault and all ${v.cookies} stored cookie(s) from this PC? This cannot be undone. Accounts stay in the list.`} onYes={async () => { await api.vaultRemove(); await refresh(); }} onClose={() => setDlg(null)} />}
     </div>
   );

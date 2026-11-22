@@ -274,7 +274,7 @@ pub fn launch(app: AppHandle, state: State<'_, Shared>, ids: Vec<AccountId>, pla
         let s = lock(&state)?;
         s.store.settings.launch_spacing_secs
     };
-    run_launches(app, ids, target, model_target, spacing);
+    run_launches(app, ids, target, model_target, spacing, true);
     Ok(())
 }
 
@@ -295,7 +295,7 @@ pub fn follow(app: AppHandle, state: State<'_, Shared>, ids: Vec<AccountId>, use
         match roblox_profile::resolve_username(&http, &username) {
             Ok(user_id) => {
                 let target = LaunchTarget::Follow { user_id };
-                run_launches(app, ids, target, Target::Place { place_id: 0 }, spacing);
+                run_launches(app, ids, target, Target::Place { place_id: 0 }, spacing, true);
             }
             Err(e) => {
                 for id in ids {
@@ -401,7 +401,16 @@ fn restore_graphics(app: &AppHandle, xml_undo: Option<client_settings::XmlUndo>,
     }
 }
 
-fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model_target: Target, spacing: u32) {
+/// Launches one account again for auto-rejoin. The way it joined is not
+/// re-recorded (a fallback target must not replace what the user chose) and
+/// its attempt counter is kept.
+pub fn rejoin_launch(app: AppHandle, id: AccountId, target: LaunchTarget, model_target: Target) {
+    run_launches(app, vec![id], target, model_target, 0, false);
+}
+
+/// `remember`: this is a launch the user asked for, so it becomes the way
+/// the account is rejoined and clears any rejoin in progress.
+fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model_target: Target, spacing: u32, remember: bool) {
     std::thread::spawn(move || {
         let http = WinHttp::new();
         let mut first = true;
@@ -451,6 +460,22 @@ fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model
                                 }
                                 if model_target.place_id().unwrap_or(0) != 0 {
                                     s.store.push_recent(RecentLaunch { account: id, target: model_target.clone(), at: t });
+                                }
+                                if remember {
+                                    // Following someone can stop working (they leave); keep the
+                                    // place this account last went to as the way back in.
+                                    let fallback_place = match &target {
+                                        LaunchTarget::Follow { .. } => s
+                                            .diag
+                                            .last_launch
+                                            .get(&id)
+                                            .and_then(|l| l.place())
+                                            .or_else(|| s.store.recent.iter().filter(|r| r.account == id).max_by_key(|r| r.at).and_then(|r| r.target.place_id()))
+                                            .filter(|p| *p != 0),
+                                        _ => None,
+                                    };
+                                    s.diag.last_launch.insert(id, crate::cmd_diag::LastLaunch { target: target.clone(), model_target: model_target.clone(), fallback_place });
+                                    s.diag.rejoin.remove(&id);
                                 }
                                 s.log.info(&format!("launch {id}: client starting (tracker {btid})"));
                                 s.save();

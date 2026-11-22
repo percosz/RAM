@@ -28,6 +28,14 @@ pub struct Launcher {
     pub flag_file: Option<PathBuf>,
 }
 
+/// The Windows build number (22000 and up is Windows 11), or 0 when it
+/// cannot be read.
+pub fn windows_build() -> u32 {
+    reg_sz(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", Some("CurrentBuildNumber"))
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
 fn reg_sz(root: HKEY, subkey: &str, value: Option<&str>) -> Option<String> {
     let subkey = wide(subkey);
     let value = value.map(wide);

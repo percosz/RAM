@@ -46,7 +46,8 @@ export interface Account {
 export type ThemeKind =
   | "System" | "Light" | "Dark" | "Mocha" | "Macchiato" | "Frappe" | "Latte"
   | "Nord" | "Dracula" | "Gruvbox" | "RosePine" | "Lineage"
-  | "TokyoNight" | "Midnight" | "Synthwave" | "Aurora" | "WindowsXp" | "WindowsVista" | "Classic";
+  | "TokyoNight" | "Midnight" | "Synthwave" | "Aurora" | "WindowsXp" | "WindowsVista" | "Classic"
+  | "OneDark" | "SolarizedDark" | "SolarizedLight" | "Monokai" | "Everforest" | "Sakura" | "Ocean" | "Sunset" | "FrutigerAero" | "Terminal";
 
 export type Density = "Compact" | "Normal" | "Comfortable" | "Large";
 
@@ -64,6 +65,13 @@ export interface Settings {
   hide_usernames: boolean;
   /** The first-launch tutorial has been shown (finished or skipped). */
   tour_seen: boolean;
+  /** Launch an alt again when its client is dropped or crashes. */
+  auto_rejoin: boolean;
+  rejoin_max: number;
+  /** Re-check every stored sign-in this often; 0 is off. */
+  check_every_hours: number;
+  /** Wanted window backdrop: "" | "mica" | "acrylic" (applies at the next start). */
+  backdrop: string;
   /** "" follows the Windows default browser; otherwise a browser's full path. */
   browser: string;
   window: unknown;
@@ -130,7 +138,13 @@ export interface Snapshot {
   launcher_name: string;
   /** "owner/RAM" on GitHub, where releases come from. */
   github_repo: string;
+  /** The backdrop the window has right now: "" | "mica" | "acrylic". */
+  backdrop: string;
+  /** Windows build number (22000 and up is Windows 11); 0 when unknown. */
+  windows_build: number;
 }
+
+export interface BackupInfo { created: number; app_version: string; accounts: number; cookies: number; passwords: number; }
 
 export interface Adopted { account: Account; added: boolean; }
 export interface ManyResult { added: number; refreshed: number; repeated: number; failed: number; queued: number; problems: string[]; }
@@ -197,6 +211,12 @@ export const api = {
   setMain: (id: number | null) => invoke<void>("set_main", { id }),
   reorderAccounts: (ids: number[]) => invoke<void>("reorder_accounts", { ids }),
   setSettings: (settings: Settings) => invoke<Settings>("set_settings", { settings }),
+  placePin: (placeId: number, pinned: boolean) => invoke<void>("place_pin", { placeId, pinned }),
+  backupCreate: (path: string, password: string, masterPassword: string | null) => invoke<string>("backup_create", { path, password, masterPassword }),
+  backupInspect: (path: string, password: string) => invoke<BackupInfo>("backup_inspect", { path, password }),
+  backupRestore: (path: string, password: string) => invoke<string>("backup_restore", { path, password }),
+  setWindowTheme: (dark: boolean) => invoke<void>("set_window_theme", { dark }),
+  restartApp: () => invoke<void>("restart_app"),
   setGraphics: (graphics: GraphicsSettings) => invoke<GraphicsSettings>("set_graphics", { graphics }),
   openDataFolder: () => invoke<string>("open_data_folder"),
 

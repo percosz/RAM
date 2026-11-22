@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Plus, Download, RefreshCw, Trash2, Globe, KeyRound, Star, Crown, Play, UserPlus, Search, Gauge, Copy, ClipboardPaste, FolderInput, ArrowDownAZ, Eye, EyeOff, CookingPot } from "lucide-react";
+import { Plus, Download, RefreshCw, Trash2, Globe, KeyRound, Star, Crown, Play, UserPlus, Search, Gauge, Copy, ClipboardPaste, FolderInput, ArrowDownAZ, Eye, EyeOff, Bookmark, BookmarkPlus, BookmarkMinus, Check, CookingPot } from "lucide-react";
 import { api, ago, signInLabel, type Account, type Game } from "../api";
 import { Avatar, Btn, Field, Modal, StatusBadge, Toggle, tone } from "../components";
 import { ContextMenu, type MenuItem } from "../menu";
@@ -64,6 +64,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
   const [jobId, setJobId] = useState("");
   const [follow, setFollow] = useState("");
   const [menu, setMenu] = useState<null | { x: number; y: number; ids: number[] }>(null);
+  const [placesMenu, setPlacesMenu] = useState<null | { x: number; y: number }>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const suppressClick = useRef(false);
@@ -91,6 +92,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
     const on = (e: Event) => {
       const d = (e as CustomEvent<string>).detail;
       if (d === "add" || d === "import") setDialog({ kind: d });
+      if (d === "places") setPlacesMenu({ x: 212, y: 640 });
       if (d === "menu") { const first = document.querySelector<HTMLElement>(".acct"); if (first) { const id = Number(first.dataset.id); setSelected([id]); setMenu({ x: 430, y: 150, ids: [id] }); } }
     };
     window.addEventListener("ram-start-dialog", on);
@@ -283,6 +285,22 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
     ];
   };
 
+  // Saved places: the pinned entries of the place list, picked from a menu.
+  const currentPlace = Number(placeId.trim().match(/\d{3,}/)?.[0] ?? 0);
+  const savedPlaces = (snap?.games ?? []).filter((g) => g.pinned);
+  const savedHere = savedPlaces.find((g) => g.place_id === currentPlace);
+  const pinPlace = async (id: number, on: boolean) => {
+    try { await api.placePin(id, on); await refresh(); toast(on ? "Place saved." : "Place removed from the list.", "good"); }
+    catch (e) { toast(String(e), "bad"); }
+  };
+  const placeItems: MenuItem[] = [
+    ...savedPlaces.map((g): MenuItem => ({ label: g.name || `Place ${g.place_id}`, hint: String(g.place_id), icon: g.place_id === currentPlace ? <Check /> : undefined, onClick: () => setPlaceId(String(g.place_id)) })),
+    { sep: true },
+    savedHere
+      ? { label: "Remove this place from the list", icon: <BookmarkMinus />, disabled: savedHere.builtin, onClick: () => pinPlace(currentPlace, false) }
+      : { label: place.state === "ok" ? `Save "${place.game!.name}"` : "Save this place", icon: <BookmarkPlus />, disabled: !currentPlace || place.state !== "ok", onClick: () => pinPlace(currentPlace, true) },
+  ];
+
   const placeHint = (() => {
     switch (place.state) {
       case "loading": return <span className="muted">Looking up the place…</span>;
@@ -376,8 +394,9 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
 
       <div className="launchbar" data-tour="launch">
         <div className="lgroup">
+          <Btn icon title="Saved places" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPlacesMenu({ x: r.left, y: r.top - 6 }); }}><Bookmark /></Btn>
           <input className="input place mono" placeholder="Place ID" value={placeId} onChange={(e) => setPlaceId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && join()} title="Place ID or game link" />
-          <input className="input job mono" placeholder="Job ID (optional)" value={jobId} onChange={(e) => setJobId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && join()} />
+          <input className="input job mono" placeholder="Job ID" value={jobId} onChange={(e) => setJobId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && join()} />
           <Btn kind="primary" onClick={() => join()} disabled={!selected.length || place.state === "unknown"} title={selected.length ? `Launch ${selected.length} selected` : "Select accounts to launch"}><Play />Join Server</Btn>
         </div>
         <div className="lgroup">
@@ -388,6 +407,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
       </div>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.ids)} onClose={() => setMenu(null)} />}
+      {placesMenu && <ContextMenu x={placesMenu.x} y={placesMenu.y} items={placeItems} onClose={() => setPlacesMenu(null)} />}
       {dialog?.kind === "add" && <AddAccountDialog onClose={() => setDialog(null)} onImport={() => setDialog({ kind: "import" })} />}
       {dialog?.kind === "import" && <ImportDialog onClose={() => setDialog(null)} />}
       {dialog?.kind === "copyCookie" && <RevealCookieDialog id={dialog.id} what={dialog.what} name={nameOf(accounts.find((a) => a.id === dialog.id)?.username ?? "")} needPassword onClose={() => setDialog(null)} />}

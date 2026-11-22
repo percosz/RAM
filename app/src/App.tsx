@@ -13,6 +13,7 @@ import { VaultUnlockDialog } from "./dialogs";
 import "./styles/ui.css";
 import "./styles/app.css";
 import "./styles/themes.css";
+import "./styles/themes2.css";
 
 type View = "accounts" | "clients" | "diagnostics" | "settings";
 

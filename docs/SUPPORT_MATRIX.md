@@ -31,7 +31,12 @@ handler, which is what the "on this PC" notes refer to.
 | Roblox headshots | Verified | No | `thumbnails.roblox.com` batch of up to 100 ids, no cookie; URLs cached a day in `store.json`; initials until the image loads. Real headshots loaded for the demo ids. |
 | Groups, aliases, notes, favorites, Main pin | Verified | No | Main is excluded from Select All (Ctrl+A), from batch launches and from every performance setting. |
 | Row sizes Compact / Normal / Comfortable / Large | Verified | No | Compact screenshotted at the 900×560 minimum. |
-| Themes (19), accent colour, corner radius | Verified | No | Palettes are CSS variables on `:root[data-theme]`; Windows XP, Vista, Classic, Aurora and Synthwave also restyle controls. The seven added in 0.5 were screenshotted on the Accounts view, a dialog and Settings; every other screen in every theme was not checked. |
+| Auto-rejoin after a disconnect or crash, the way the account last joined | Conditional | **Yes** | The policy (which endings, spacing, cap, reset, fallback target) is unit-tested. The scheduler itself was not exercised with a real Roblox client: no rejoin has been observed end to end. |
+| Saved places in the launch bar | Verified | No | Saving, the built-in entry and a refused place 0 checked end to end on demo data. |
+| Scheduled sign-in check | Conditional | — | Uses the existing check; the timer was not waited out. |
+| Backup and restore (one password-protected file) | Verified | No | File format unit-tested (round trip, wrong password, tampering, other files). Create, inspect, wrong password and restore checked end to end on demo data with an empty vault; a backup carrying real cookies was not made. |
+| Window backdrop: Mica / Acrylic | Verified | No | Both applied and screenshotted on Windows 11 build 26300; Windows 10 was not available (Mica is refused there by build number, unit-tested). |
+| Themes (29), accent colour, corner radius | Verified | No | Palettes are CSS variables on `:root[data-theme]`; Windows XP, Vista, Classic, Aurora and Synthwave also restyle controls. The seven added in 0.5 were screenshotted on the Accounts view, a dialog and Settings; every other screen in every theme was not checked. |
 | Versioned store with atomic saves and backup recovery | Verified | No | Unit tests cover interrupted saves, corrupt files, newer versions. A v0.2 store loads (dropped settings are ignored). |
 | Keyboard: Ctrl+A select all, Enter join, Delete remove, Esc close dialog | Verified | No | |
 | High DPI | Conditional | No | WebView2 scales the page with the monitor; checked at 100% only on this machine. |

@@ -452,6 +452,18 @@ pub enum ThemeKind {
     WindowsVista,
     /// Windows 95-style grey with bevelled controls.
     Classic,
+    OneDark,
+    SolarizedDark,
+    SolarizedLight,
+    Monokai,
+    Everforest,
+    Sakura,
+    Ocean,
+    Sunset,
+    /// Glossy aqua and green, mid-2000s style.
+    FrutigerAero,
+    /// Green on black in a monospace font.
+    Terminal,
 }
 
 impl ThemeKind {
@@ -460,7 +472,8 @@ impl ThemeKind {
         use ThemeKind::*;
         &[
             System, Light, Dark, Mocha, Macchiato, Frappe, Latte, Nord, Dracula, Gruvbox, RosePine, Lineage, TokyoNight, Midnight,
-            Synthwave, Aurora, WindowsXp, WindowsVista, Classic,
+            Synthwave, Aurora, WindowsXp, WindowsVista, Classic, OneDark, SolarizedDark, SolarizedLight, Monokai, Everforest, Sakura,
+            Ocean, Sunset, FrutigerAero, Terminal,
         ]
     }
 
@@ -485,6 +498,16 @@ impl ThemeKind {
             ThemeKind::WindowsXp => "Windows XP",
             ThemeKind::WindowsVista => "Windows Vista",
             ThemeKind::Classic => "Classic (95)",
+            ThemeKind::OneDark => "One Dark",
+            ThemeKind::SolarizedDark => "Solarized Dark",
+            ThemeKind::SolarizedLight => "Solarized Light",
+            ThemeKind::Monokai => "Monokai",
+            ThemeKind::Everforest => "Everforest",
+            ThemeKind::Sakura => "Sakura",
+            ThemeKind::Ocean => "Ocean",
+            ThemeKind::Sunset => "Sunset",
+            ThemeKind::FrutigerAero => "Frutiger Aero",
+            ThemeKind::Terminal => "Terminal",
         }
     }
 }
@@ -552,11 +575,26 @@ pub struct Settings {
     pub hide_usernames: bool,
     /// The first-launch tutorial has been shown (finished or skipped).
     pub tour_seen: bool,
+    /// Launch an alt again when its client is dropped by Roblox or crashes,
+    /// the same way it last joined. Never Main.
+    pub auto_rejoin: bool,
+    /// Rejoin attempts before giving up (reset once a client stays up).
+    #[serde(default = "default_rejoin_max")]
+    pub rejoin_max: u32,
+    /// Re-check every stored sign-in this often; 0 is off.
+    pub check_every_hours: u32,
+    /// Window backdrop: "" (solid), "mica" or "acrylic". Takes effect at the
+    /// next start, because the window has to be created see-through.
+    pub backdrop: String,
     /// Browser for Open Browser and sign-in: empty follows the Windows
     /// default; otherwise the full path of a Chromium-based browser.
     pub browser: String,
     pub window: Option<Rect>,
     pub last_import_dir: String,
+}
+
+fn default_rejoin_max() -> u32 {
+    3
 }
 
 impl Default for Settings {
@@ -574,6 +612,10 @@ impl Default for Settings {
             seen_version: String::new(),
             hide_usernames: false,
             tour_seen: false,
+            auto_rejoin: false,
+            rejoin_max: default_rejoin_max(),
+            check_every_hours: 0,
+            backdrop: String::new(),
             browser: String::new(),
             window: None,
             last_import_dir: String::new(),

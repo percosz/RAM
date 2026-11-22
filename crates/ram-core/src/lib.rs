@@ -1,6 +1,7 @@
 ﻿//! Platform-independent core of RAM.
 
 pub mod client_settings;
+pub mod backup;
 pub mod clientlog;
 pub mod clients;
 pub mod cookies;
@@ -15,6 +16,7 @@ pub mod oauth;
 pub mod perf;
 pub mod platform;
 pub mod redact;
+pub mod rejoin;
 pub mod roblox;
 pub mod roblox_profile;
 pub mod search;

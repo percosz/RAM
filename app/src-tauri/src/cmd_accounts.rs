@@ -126,6 +126,24 @@ pub fn set_settings(state: State<'_, Shared>, settings: Settings) -> Result<Sett
     Ok(s.store.settings.clone())
 }
 
+/// Saves a place to the launch bar's list, or takes it off. The built-in
+/// place always stays.
+#[tauri::command]
+pub fn place_pin(state: State<'_, Shared>, place_id: u64, pinned: bool) -> Result<(), String> {
+    if place_id == 0 {
+        return Err("Enter a place ID first.".into());
+    }
+    let mut s = lock(&state)?;
+    match s.store.games.iter_mut().find(|g| g.place_id == place_id) {
+        Some(g) if g.builtin && !pinned => return Err("The built-in place stays in the list.".into()),
+        Some(g) => g.pinned = pinned,
+        None if pinned => s.store.games.push(ram_core::model::Game { place_id, pinned: true, ..Default::default() }),
+        None => {}
+    }
+    s.save();
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_graphics(state: State<'_, Shared>, graphics: ram_core::client_settings::GraphicsSettings) -> Result<ram_core::client_settings::GraphicsSettings, String> {
     ram_core::client_settings::validate_custom(&graphics.custom_flags)?;

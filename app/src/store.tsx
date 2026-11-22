@@ -53,12 +53,17 @@ const THEME_ATTR: Record<string, string> = {
   Nord: "nord", Dracula: "dracula", Gruvbox: "gruvbox", RosePine: "rosepine", Lineage: "lineage",
   TokyoNight: "tokyonight", Midnight: "midnight", Synthwave: "synthwave", Aurora: "aurora",
   WindowsXp: "xp", WindowsVista: "vista", Classic: "classic",
+  OneDark: "onedark", SolarizedDark: "solarized-dark", SolarizedLight: "solarized-light", Monokai: "monokai",
+  Everforest: "everforest", Sakura: "sakura", Ocean: "ocean", Sunset: "sunset", FrutigerAero: "frutiger", Terminal: "terminal",
 };
 /** Themes whose look depends on their own corner shape; the Corners slider is ignored for them. */
-export const FIXED_CORNERS: Record<string, number> = { WindowsXp: 3, Classic: 0 };
+export const FIXED_CORNERS: Record<string, number> = { WindowsXp: 3, Classic: 0, Terminal: 0 };
+/** The title bar's last known shade, so Windows is only told when it changes. */
+let titleBarDark: boolean | null = null;
 
-function applyTheme(s: Settings) {
+function applyTheme(s: Settings, backdrop: string) {
   const root = document.documentElement;
+  if (backdrop) root.setAttribute("data-backdrop", backdrop); else root.removeAttribute("data-backdrop");
   let name = THEME_ATTR[s.theme] ?? "";
   if (!name) name = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   root.setAttribute("data-theme", name);
@@ -77,6 +82,9 @@ function applyTheme(s: Settings) {
   const corner = fixed ?? Math.max(0, Math.min(16, s.corner_radius));
   root.style.setProperty("--radius", `${fixed ?? corner + 4}px`);
   root.style.setProperty("--radius-sm", `${corner}px`);
+  // The native title bar (and a Mica backdrop) follow the theme's shade.
+  const dark = getComputedStyle(root).getPropertyValue("--scheme").trim() !== "light";
+  if (dark !== titleBarDark) { titleBarDark = dark; api.setWindowTheme(dark).catch(() => {}); }
 }
 
 /** "Thornwick_Eli" → "Tho********" when hiding, like niccs' manager. */
@@ -98,7 +106,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const s = await api.snapshot();
       setSnap(s);
-      applyTheme(s.settings);
+      applyTheme(s.settings, s.backdrop);
       setSelected((sel) => sel.filter((id) => s.accounts.some((a) => a.id === id)));
     } catch (e) {
       console.error(e);
@@ -115,7 +123,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const saveSettings = useCallback(async (patch: Partial<Settings>) => {
     if (!snap) return;
     const next = { ...snap.settings, ...patch };
-    applyTheme(next);
+    applyTheme(next, snap.backdrop);
     const saved = await api.setSettings(next);
     setSnap((s) => (s ? { ...s, settings: saved } : s));
   }, [snap]);
@@ -206,6 +214,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const every = window.setInterval(() => { void checkForUpdate(false); }, 6 * 3600 * 1000);
     return () => { window.clearTimeout(t); window.clearInterval(every); };
   }, [autoCheck, checkForUpdate]);
+
+  // Scheduled sign-in check: every stored cookie, on the chosen interval,
+  // with one line about the accounts that turned out to be signed out.
+  const snapRef = useRef<Snapshot | null>(null);
+  snapRef.current = snap;
+  const everyHours = snap?.settings.check_every_hours ?? 0;
+  useEffect(() => {
+    if (!everyHours) return;
+    const run = async () => {
+      const s = snapRef.current;
+      if (!s || !s.vault.unlocked) return;
+      const ids = s.accounts.filter((a) => a.has_cookie).map((a) => a.id);
+      if (!ids.length) return;
+      const before = new Set(s.accounts.filter((a) => a.sign_in.state === "SignedOut").map((a) => a.id));
+      try { await api.checkAccounts(ids); } catch { return; }
+      // Results come in account by account; look once they have had time to.
+      window.setTimeout(() => {
+        const now = snapRef.current;
+        if (!now) return;
+        const dead = now.accounts.filter((a) => a.sign_in.state === "SignedOut" && !before.has(a.id));
+        if (!dead.length) return;
+        const names = dead.slice(0, 4).map((a) => maskName(a.username, now.settings.hide_usernames)).join(", ");
+        toast(`${dead.length === 1 ? "1 account needs" : `${dead.length} accounts need`} signing in again: ${names}${dead.length > 4 ? "…" : ""}`, "warn");
+      }, Math.min(120_000, 8000 + ids.length * 1500));
+    };
+    const t = window.setInterval(run, everyHours * 3600 * 1000);
+    return () => window.clearInterval(t);
+  }, [everyHours, toast]);
 
   const hideNames = !!snap?.settings.hide_usernames;
   const nameOf = useCallback((username: string) => maskName(username, hideNames), [hideNames]);

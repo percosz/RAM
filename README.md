@@ -67,7 +67,9 @@ auto-updater verifies every update against RAM's own release signature.
 - **Login check.** The RoALT method: `users.roblox.com/v1/users/authenticated`
   with the cookie. 401 means invalid; a "bound session" or verification
   challenge is reported as such; rate limits and network errors never change
-  what you last knew. Rotated cookies are saved automatically.
+  what you last knew. Rotated cookies are saved automatically. A scheduled
+  check (every 1 to 12 hours) can tell you which accounts need signing in
+  again.
 - **Vault.** Cookies and saved passwords are encrypted at rest with Windows
   data protection (DPAPI) or a master password (Argon2id + AES‑256‑GCM) with
   auto-lock and a one-time recovery code. Copying a cookie or a password
@@ -87,6 +89,12 @@ auto-updater verifies every update against RAM's own release signature.
   you turn them on and never applied to Main or Full quality accounts. A
   bandwidth limit is also there; it is a Windows network policy, so it asks
   for administrator approval and applies to every Roblox client on the PC.
+- **Auto-rejoin.** Optional: when an alt is disconnected or crashes, RAM
+  launches it again the way it last joined (same server, same place, or the
+  user it followed), falling back to the place if that does not work, with
+  spaced and capped attempts. Never a client you closed yourself, never Main.
+- **Saved places.** A bookmark button next to the Place ID keeps your places
+  one click away.
 - **Clients.** Every Roblox client that is open, with its account and memory
   use; close one, or Minimize all / Restore all with one click.
 - **Diagnostics.** A crash history that says how each client ended
@@ -99,12 +107,18 @@ auto-updater verifies every update against RAM's own release signature.
   `AccountData.json` and its backups (`.backup`, `.bak`, `.old`), unlocks the
   file if it has a password, shows a preview, and moves its cookies and saved
   passwords into the vault; export back out with or without cookies.
-- **Themes and rows.** Nineteen themes: System, Light, Dark, Catppuccin
-  (Mocha, Macchiato, Frappé, Latte), Nord, Dracula, Gruvbox, Rosé Pine,
-  Tokyo Night, Midnight (pure black), a muted Lineage palette, and five that
+- **Backup and restore.** One file with your accounts, settings, cookies and
+  saved passwords, encrypted with a password you choose and restorable on
+  any PC.
+- **Themes and rows.** Twenty-nine themes. Palettes: System, Light, Dark,
+  Midnight (pure black), Catppuccin (Mocha, Macchiato, Frappé, Latte), Nord,
+  Dracula, Gruvbox, Rosé Pine, Tokyo Night, One Dark, Solarized (dark and
+  light), Monokai, Everforest, Sakura and a muted Lineage palette. Looks that
   restyle the whole app: Windows XP, Windows Vista (Aero glass), Classic
-  (95), Aurora (glass) and Synthwave. Plus an accent colour, corner radius,
-  and four row sizes from Compact (one line) to Large.
+  (95), Frutiger Aero, Aurora, Ocean, Sunset, Synthwave and Terminal. An
+  optional **window backdrop** (Mica on Windows 11, or Acrylic) lets the
+  desktop show through. Plus an accent colour, corner radius, and four row
+  sizes from Compact (one line) to Large.
 - **Tutorial.** A one-minute tour on first launch points at each part of the
   app in turn; skip it at any step and repeat it from the bottom of Settings.
 - **Updates.** RAM checks GitHub Releases when it starts and every 6 hours.
@@ -122,6 +136,10 @@ auto-updater verifies every update against RAM's own release signature.
 ![Windows Vista theme](docs/screenshot-theme-vista.png)
 
 ![Aurora theme](docs/screenshot-theme-aurora.png)
+
+![Frutiger Aero theme](docs/screenshot-theme-frutiger.png)
+
+![Terminal theme](docs/screenshot-theme-terminal.png)
 
 ![Tutorial](docs/screenshot-tutorial.png)
 

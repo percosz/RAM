@@ -63,6 +63,10 @@ pub struct Snapshot {
     pub browser_name: String,
     pub launcher_name: String,
     pub github_repo: String,
+    /// The backdrop the window has right now ("", "mica" or "acrylic").
+    pub backdrop: String,
+    /// Windows build number (22000 and up is Windows 11), 0 when unknown.
+    pub windows_build: u32,
 }
 
 #[derive(Deserialize)]
@@ -158,6 +162,8 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         browser_name: environment(&s.store.settings.browser).0,
         launcher_name: environment(&s.store.settings.browser).1,
         github_repo: crate::cmd_update::GITHUB_REPO.to_string(),
+        backdrop: s.backdrop.to_string(),
+        windows_build: s.windows_build,
     }
 }
 

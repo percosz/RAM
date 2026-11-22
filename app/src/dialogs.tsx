@@ -1,10 +1,10 @@
 // Modal flows: add account, set/reveal cookie, vault setup/unlock/change, import, confirm.
 
 import { useEffect, useState, type ReactNode } from "react";
-import { open as pickDialog } from "@tauri-apps/plugin-dialog";
+import { open as pickDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Download, ExternalLink } from "lucide-react";
-import { api, type FoundFile, type PlanView, type QueueEvent } from "./api";
+import { api, type BackupInfo, type FoundFile, type PlanView, type QueueEvent } from "./api";
 import { Btn, Field, Modal, Toggle } from "./components";
 import { useApp } from "./store";
 
@@ -16,6 +16,74 @@ export function ConfirmDialog({ title, text, danger, onYes, onClose }: { title: 
   return (
     <Modal title={title} onClose={onClose} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind={danger ? "danger" : "primary"} onClick={() => { onYes(); onClose(); }}>{danger ? "Remove" : "OK"}</Btn></>}>
       <p style={{ margin: 0 }}>{text}</p>
+    </Modal>
+  );
+}
+
+/** Writes everything RAM holds to one password-protected file. */
+export function BackupDialog({ onClose }: { onClose: () => void }) {
+  const { toast, snap } = useApp();
+  const [pw, setPw] = useState(""); const [pw2, setPw2] = useState("");
+  const [master, setMaster] = useState(""); const [askMaster, setAskMaster] = useState(false);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const ok = pw.length >= 8 && pw === pw2 && (!askMaster || master.length > 0);
+  const run = async () => {
+    setErr("");
+    const path = await saveDialog({ title: "Save the RAM backup", defaultPath: `RAM-backup-${new Date().toISOString().slice(0, 10)}.rambackup`, filters: [{ name: "RAM backup", extensions: ["rambackup"] }] });
+    if (!path) return;
+    setBusy(true);
+    try { toast(await api.backupCreate(path, pw, askMaster ? master : null), "good"); onClose(); }
+    catch (e) { const t = errText(e); if (t === "PASSWORD_REQUIRED") setAskMaster(true); else setErr(t); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Back up everything" onClose={busy ? () => {} : onClose} footer={<><Btn onClick={onClose} disabled={busy}>Cancel</Btn><Btn kind="primary" disabled={!ok || busy} onClick={run}>{busy ? "Encrypting…" : "Choose where to save…"}</Btn></>}>
+      <p className="muted" style={{ margin: 0 }}>
+        One file with your {snap?.accounts.length ?? 0} account{snap?.accounts.length === 1 ? "" : "s"}, settings, and every stored cookie and saved password, encrypted with a password you choose here. It can be restored on any PC.
+      </p>
+      <Field label="Backup password (8 characters or more)"><input className="input" type="password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+      <Field label="Again"><input className="input" type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ok && run()} /></Field>
+      {pw2.length > 0 && pw !== pw2 && <div className="bad">The two passwords are different.</div>}
+      {askMaster && <Field label="Your vault's master password"><input className="input" type="password" autoFocus value={master} onChange={(e) => setMaster(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ok && run()} /></Field>}
+      <div className="hint">Anyone with this file and its password can sign in as your accounts, so keep both safe. A forgotten backup password cannot be recovered.</div>
+      {err && <div className="bad">{err}</div>}
+    </Modal>
+  );
+}
+
+/** Replaces what RAM holds with a backup file, after showing what is in it. */
+export function RestoreDialog({ onClose }: { onClose: () => void }) {
+  const { toast, snap } = useApp();
+  const [path, setPath] = useState(""); const [pw, setPw] = useState("");
+  const [info, setInfo] = useState<BackupInfo | null>(null);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const pick = async () => {
+    const p = await pickDialog({ title: "Choose a RAM backup", filters: [{ name: "RAM backup", extensions: ["rambackup"] }, { name: "All files", extensions: ["*"] }] });
+    if (p && !Array.isArray(p)) { setPath(p); setInfo(null); setErr(""); }
+  };
+  const open = async () => {
+    setErr(""); setBusy(true);
+    try { setInfo(await api.backupInspect(path, pw)); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  const restore = async () => {
+    setErr(""); setBusy(true);
+    try { toast(await api.backupRestore(path, pw), "good"); onClose(); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  const have = snap?.accounts.length ?? 0;
+  return (
+    <Modal title="Restore from a backup" onClose={busy ? () => {} : onClose}
+      footer={<><Btn onClick={onClose} disabled={busy}>Cancel</Btn>{info
+        ? <Btn kind="danger" disabled={busy} onClick={restore}>{busy ? "Restoring…" : "Replace and restore"}</Btn>
+        : <Btn kind="primary" disabled={busy || !path || !pw} onClick={open}>{busy ? "Opening…" : "Open backup"}</Btn>}</>}>
+      <div className="row"><Btn onClick={pick} disabled={busy}>Choose file…</Btn><span className="hint ellipsis" title={path}>{path || "No file chosen."}</span></div>
+      <Field label="Backup password"><input className="input" type="password" value={pw} onChange={(e) => { setPw(e.target.value); setInfo(null); }} onKeyDown={(e) => e.key === "Enter" && path && pw && !info && open()} /></Field>
+      {info && (
+        <div className="callout">
+          <b>Backup from {new Date(info.created * 1000).toLocaleString()}</b> (RAM {info.app_version}): {info.accounts} account{info.accounts === 1 ? "" : "s"}, {info.cookies} cookie{info.cookies === 1 ? "" : "s"}, {info.passwords} password{info.passwords === 1 ? "" : "s"}.
+          <div style={{ marginTop: 6 }}>Restoring <b>replaces</b> the {have} account{have === 1 ? "" : "s"}, the settings and the stored cookies RAM has now. The current data file is kept next to it as <span className="mono">store.before-restore.json</span>.</div>
+        </div>
+      )}
+      {err && <div className="bad">{err}</div>}
     </Modal>
   );
 }

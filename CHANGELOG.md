@@ -4,6 +4,20 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.6.0 (2026-11-22)
+
+### New
+- **Auto-rejoin** (Settings → Launching, off by default). When an alt's client is disconnected by Roblox or crashes, RAM launches it again the way it last joined: the same server, the same place, or the user it followed. The first attempt repeats that exactly; if it does not get the account back into a game within two minutes, later attempts go to the place instead (a server can be gone, a followed user can have left). Attempts are spaced out (10 s, 30 s, 90 s, longer) and capped at the number you pick; a client that stays up for 10 minutes resets the count. It never rejoins a client you closed yourself, one that was replaced by another sign-in, a refused sign-in, or Main.
+- **Saved places.** The bookmark button next to the Place ID keeps a list of places: pick one to fill the box, or save the place you have typed.
+- **Scheduled sign-in check** (Settings → Launching): re-checks every stored cookie every 1, 3, 6 or 12 hours and tells you which accounts need signing in again.
+- **Backup and restore** (Settings → Data). One file with your accounts, settings, cookies and saved passwords, encrypted with a password you choose, restorable on any PC. Making one asks for Windows Hello or your master password, the same as copying a cookie. Restoring replaces what RAM holds and keeps the replaced data file as `store.before-restore.json`.
+- **Window backdrop** (Settings → Appearance): **Mica** (Windows 11) or **Acrylic** lets your desktop show through the window, tinted by the theme. It takes effect when RAM starts again; with it off, the window is created exactly as before.
+- **Ten more themes**, now in three groups. Palettes: One Dark, Solarized Dark, Solarized Light, Monokai, Everforest, Sakura. Looks: Ocean, Sunset, Frutiger Aero (glossy aqua and green), Terminal (green on black, monospace, scan lines).
+- The window's title bar is dark or light to match the theme.
+
+### Changed
+- The theme picker is split into Basics, Palettes and Looks.
+
 ## 0.5.0 (2026-11-22)
 
 ### New

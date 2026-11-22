@@ -2,6 +2,7 @@
 
 mod cmd_accounts;
 mod cmd_add;
+mod cmd_backup;
 mod cmd_browser;
 mod cmd_diag;
 mod cmd_io;
@@ -11,6 +12,7 @@ mod cmd_vault;
 mod dto;
 mod state;
 mod svc;
+mod window;
 
 use state::{AppState, Shared};
 use std::sync::Mutex;
@@ -87,8 +89,26 @@ pub fn run() {
             cmd_update::release_notes,
             cmd_update::mark_seen_version,
             cmd_update::open_url,
+            cmd_accounts::place_pin,
+            cmd_backup::backup_create,
+            cmd_backup::backup_inspect,
+            cmd_backup::backup_restore,
+            window::set_window_theme,
+            window::restart_app,
         ])
         .setup(|app| {
+            // The window is created here, not from the configuration, so it
+            // can be made see-through when a backdrop is turned on.
+            let build = ram_win::launcher_info::windows_build();
+            let wanted = app.state::<Shared>().lock().map(|s| s.store.settings.backdrop.clone()).unwrap_or_default();
+            let backdrop = window::create_main(app.handle(), &wanted, build)?;
+            if let Ok(mut s) = app.state::<Shared>().lock() {
+                s.backdrop = backdrop;
+                s.windows_build = build;
+                if !backdrop.is_empty() {
+                    s.log.info(&format!("window: {backdrop} backdrop"));
+                }
+            }
             cmd_diag::spawn_watcher(app.handle().clone());
             Ok(())
         })

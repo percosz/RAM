@@ -1,0 +1,151 @@
+/* More themes (0.6) and the see-through window backdrop.
+
+   Same rules as themes.css: static CSS only, no images, no running
+   animations. Palettes: One Dark (MIT), Solarized (MIT), Monokai,
+   Everforest (MIT); see NOTICE.md. */
+
+.theme-group { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 4px 0 -4px; }
+
+/* ---- Palette themes ----------------------------------------------------- */
+:root[data-theme="onedark"] { --bg: #282c34; --surface: #2f343e; --surface-2: #3a404c; --text: #c8ccd4; --muted: #8b93a3; --border: #454c59; --accent: #61afef; --accent-text: #1e222a; --good: #98c379; --warn: #e5c07b; --bad: #e06c75; --scheme: dark; }
+:root[data-theme="solarized-dark"] { --bg: #002b36; --surface: #073642; --surface-2: #0d4250; --text: #c9d3d3; --muted: #839496; --border: #1a5361; --accent: #268bd2; --accent-text: #fdf6e3; --good: #859900; --warn: #b58900; --bad: #dc322f; --scheme: dark; }
+:root[data-theme="solarized-light"] { --bg: #fdf6e3; --surface: #fffbf0; --surface-2: #eee8d5; --text: #354b53; --muted: #657b83; --border: #d9d2bd; --accent: #268bd2; --accent-text: #ffffff; --good: #6c7d00; --warn: #946f00; --bad: #c62d2a; --scheme: light; }
+:root[data-theme="monokai"] { --bg: #272822; --surface: #2e2f29; --surface-2: #3a3b33; --text: #f8f8f2; --muted: #a59f85; --border: #49483e; --accent: #a6e22e; --accent-text: #1e1f1a; --good: #a6e22e; --warn: #e6db74; --bad: #f92672; --scheme: dark; }
+:root[data-theme="everforest"] { --bg: #2d353b; --surface: #343f44; --surface-2: #3d484d; --text: #d3c6aa; --muted: #9da9a0; --border: #4f585e; --accent: #a7c080; --accent-text: #232a2e; --good: #a7c080; --warn: #dbbc7f; --bad: #e67e80; --scheme: dark; }
+:root[data-theme="sakura"] {
+  --bg: #fff5f8; --surface: #ffffff; --surface-2: #fde7ee; --text: #4a2c3a; --muted: #8a6474; --border: #f3c9d6;
+  --accent: #e0568c; --accent-text: #ffffff; --good: #2f8f5b; --warn: #a8650a; --bad: #c62845; --scheme: light;
+  body { background: linear-gradient(180deg, #fff5f8, #ffe9f1) fixed; }
+  .sidebar, .details, .launchbar, .statusbar { background: rgba(255, 255, 255, .72); }
+}
+
+/* ---- Ocean: deep blue wash, see-through panels -------------------------- */
+:root[data-theme="ocean"] {
+  --bg: #061624; --surface: #0c2236; --surface-2: #133049; --text: #dcefff; --muted: #8fb0cc; --border: #1f4463;
+  --accent: #38bdf8; --accent-text: #04121e; --good: #5eead4; --warn: #fbbf24; --bad: #fb7185; --scheme: dark;
+
+  body {
+    background:
+      radial-gradient(900px 520px at 14% -4%, rgba(0, 170, 230, .32), transparent 60%),
+      radial-gradient(900px 620px at 100% 104%, rgba(0, 90, 210, .38), transparent 60%),
+      #061624 fixed;
+  }
+  .sidebar, .details, .launchbar, .statusbar, .card { background: rgba(120, 200, 255, .06); border-color: rgba(140, 210, 255, .14); }
+  .toolbar { border-color: rgba(140, 210, 255, .14); }
+  .btn { background: rgba(120, 200, 255, .09); border-color: rgba(140, 210, 255, .18); }
+  .btn:hover { background: rgba(120, 200, 255, .17); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); }
+  .btn.ghost { background: transparent; border-color: transparent; }
+  .input, .select, .textarea { background-color: rgba(2, 12, 22, .5); border-color: rgba(140, 210, 255, .18); }
+  .select option { background: #0c2236; }
+  .seg, .vault-pill, .theme-chip, .badge.muted { background: rgba(120, 200, 255, .08); border-color: rgba(140, 210, 255, .14); }
+  .modal, .tour-card { background: rgba(12, 34, 54, .8); backdrop-filter: blur(18px) saturate(1.4); border-color: rgba(140, 210, 255, .2); }
+  .group-h, .table th { background: rgba(6, 22, 36, .66); backdrop-filter: blur(10px); }
+  .log { background: rgba(2, 12, 22, .5); }
+}
+
+/* ---- Sunset: violet into orange ---------------------------------------- */
+:root[data-theme="sunset"] {
+  --bg: #2a1436; --surface: #3a1d45; --surface-2: #4b2752; --text: #fff1e6; --muted: #e0b8b0; --border: #6b3a5e;
+  --accent: #ffb454; --accent-text: #2a1436; --good: #9be29b; --warn: #ffd166; --bad: #ff8a94; --scheme: dark;
+
+  body { background: linear-gradient(160deg, #24104a 0%, #6d2760 46%, #c9583f 100%) fixed; }
+  .sidebar, .details, .launchbar, .statusbar, .card { background: rgba(22, 8, 32, .46); border-color: rgba(255, 220, 200, .14); }
+  .toolbar { border-color: rgba(255, 220, 200, .14); }
+  .btn { background: rgba(255, 230, 210, .1); border-color: rgba(255, 220, 200, .2); }
+  .btn:hover { background: rgba(255, 230, 210, .18); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 16px -4px rgba(255, 180, 84, .7); }
+  .btn.ghost { background: transparent; border-color: transparent; }
+  .input, .select, .textarea { background-color: rgba(18, 6, 26, .5); border-color: rgba(255, 220, 200, .2); }
+  .select option { background: #3a1d45; }
+  .seg, .vault-pill, .theme-chip, .badge.muted { background: rgba(255, 230, 210, .09); border-color: rgba(255, 220, 200, .16); }
+  .modal, .tour-card { background: rgba(52, 24, 60, .82); backdrop-filter: blur(18px) saturate(1.3); border-color: rgba(255, 220, 200, .2); }
+  .group-h, .table th { background: rgba(36, 16, 50, .62); backdrop-filter: blur(10px); }
+  .log { background: rgba(18, 6, 26, .5); }
+}
+
+/* ---- Frutiger Aero: glossy aqua and green ------------------------------ */
+:root[data-theme="frutiger"] {
+  --bg: #dff3fb; --surface: #f7fdff; --surface-2: #e3f5fb; --text: #12384a; --muted: #4f7486; --border: #a9d6e8;
+  --accent: #1aa3d9; --accent-text: #ffffff; --good: #2f9e44; --warn: #946200; --bad: #c0392b; --scheme: light;
+
+  body {
+    background:
+      radial-gradient(900px 480px at 8% -10%, rgba(140, 232, 160, .8), transparent 60%),
+      radial-gradient(900px 500px at 96% -4%, rgba(90, 200, 250, .85), transparent 60%),
+      linear-gradient(180deg, #bfe9fb 0%, #eafaff 55%, #d4f3dc 100%) fixed;
+  }
+  .sidebar { background: linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, .38)); border-right-color: #9ccfe4; box-shadow: inset -1px 0 0 rgba(255, 255, 255, .9); }
+  .details, .launchbar, .statusbar, .card { background: rgba(255, 255, 255, .66); }
+  .toolbar { background: rgba(255, 255, 255, .36); }
+  .group-h, .table th { background: rgba(223, 243, 251, .7); backdrop-filter: blur(10px); }
+
+  .btn { background: linear-gradient(180deg, #ffffff 0%, #e2f5fd 48%, #c2e8f8 52%, #ecfaff 100%); border-color: #7cc3e0; border-radius: 999px; color: #12384a; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95); }
+  .btn:hover { background: linear-gradient(180deg, #ffffff 0%, #d2f0fd 48%, #aee1f7 52%, #e2f8ff 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 0 8px rgba(26, 163, 217, .5); }
+  .btn.primary { background: linear-gradient(180deg, #9be89b 0%, #45c056 48%, #2aa53d 52%, #5ad468 100%); border-color: #1c7f2c; color: #fff; text-shadow: 0 1px 1px rgba(0, 70, 20, .55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6); }
+  .btn.primary:hover { background: linear-gradient(180deg, #adf0ad 0%, #53cc63 48%, #31b146 52%, #68de75 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 0 9px rgba(63, 186, 79, .6); }
+  .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+  .btn.ghost:hover { background: rgba(255, 255, 255, .65); border-color: #b5ddeb; box-shadow: none; }
+  .btn.danger { color: #c0392b; }
+  .input, .select, .textarea { background-color: rgba(255, 255, 255, .92); border-color: #9ccfe4; border-radius: 999px; }
+  .textarea { border-radius: var(--radius-sm); }
+  .nav { border-radius: 999px; }
+  .nav.active { background: linear-gradient(180deg, #ffffff, #c9ecfa); box-shadow: inset 0 0 0 1px #8fd0ea, 0 2px 6px -3px rgba(18, 90, 120, .5); color: #0d3f55; }
+  .nav:hover { background: rgba(255, 255, 255, .6); }
+  .acct.selected { background: linear-gradient(180deg, rgba(214, 242, 253, .95), rgba(186, 230, 250, .95)); box-shadow: inset 0 0 0 1px #84cbe8; }
+  .seg, .vault-pill, .theme-chip { background: rgba(255, 255, 255, .62); }
+  .seg, .seg button { border-radius: 999px; }
+  .modal, .tour-card { background: rgba(247, 253, 255, .9); backdrop-filter: blur(16px) saturate(1.5); border-color: rgba(255, 255, 255, .9); box-shadow: 0 0 0 1px #7cc3e0, 0 24px 60px rgba(18, 80, 110, .4); }
+  .modal-h { background: linear-gradient(90deg, #35b44a 0%, #5fd0c8 50%, #2f9fd8 100%); color: #fff; text-shadow: 0 1px 2px rgba(0, 50, 60, .55); padding: 10px 12px 10px 16px; border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; align-items: center; }
+  .modal-h .btn { color: #fff; }
+  .modal-b { padding-top: 14px; }
+  .menu { background: rgba(247, 253, 255, .88); }
+}
+
+/* ---- Terminal: green on black, monospace ------------------------------- */
+:root[data-theme="terminal"] {
+  --bg: #050805; --surface: #0a100a; --surface-2: #101a10; --text: #7dff7d; --muted: #3fae3f; --border: #1d4d1d;
+  --accent: #39ff14; --accent-text: #031003; --good: #39ff14; --warn: #e6ff3a; --bad: #ff5f56; --scheme: dark;
+  --font: var(--mono);
+
+  body { font-size: 12.5px; text-shadow: 0 0 6px rgba(57, 255, 20, .28); }
+  /* Scan lines: one static overlay that never repaints. */
+  body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9999; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .2) 0 1px, transparent 1px 3px); }
+  .btn { background: transparent; border-color: #2a7a2a; color: var(--text); text-transform: lowercase; }
+  .btn:hover { background: rgba(57, 255, 20, .12); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); text-shadow: none; background-image: none; }
+  .btn.primary:hover { background: #7dff5e; background-image: none; }
+  .btn.ghost { border-color: transparent; }
+  .btn.danger { color: var(--bad); border-color: #7a2a2a; }
+  .input, .select, .textarea { background-color: #030603; }
+  .card { box-shadow: none; }
+  .card-h { color: var(--accent); }
+  .card-h::before { content: "> "; }
+  .nav.active { background: rgba(57, 255, 20, .14); box-shadow: inset 3px 0 0 var(--accent); }
+  .brand b::after { content: "_"; }
+  .acct.selected { background: rgba(57, 255, 20, .13); }
+  .avatar img { filter: grayscale(1) sepia(1) hue-rotate(60deg) saturate(2.4) brightness(.9); }
+  .modal, .tour-card, .menu { background: #050805; border-color: var(--accent); box-shadow: 0 0 0 1px #0d2a0d, 0 0 28px -6px rgba(57, 255, 20, .5); backdrop-filter: none; }
+  .backdrop { backdrop-filter: none; background: rgba(0, 0, 0, .7); }
+  .badge { border-radius: 0; }
+}
+
+/* ---- Window backdrop (Mica / Acrylic) ----------------------------------
+   Set when the window was created see-through (Settings → Appearance →
+   Window backdrop). The page stops painting its own background and every
+   large surface becomes a tint of the theme's colours, so the desktop shows
+   through. Windows XP and Classic are meant to be solid and stay that way. */
+:root[data-backdrop]:not([data-theme="xp"]):not([data-theme="classic"]) {
+  body { background: transparent; }
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: color-mix(in srgb, var(--bg) 56%, transparent); }
+  .sidebar, .details, .launchbar, .statusbar, .card { background: color-mix(in srgb, var(--surface) 46%, transparent); }
+  .toolbar { background: transparent; }
+  .group-h, .table th { background: color-mix(in srgb, var(--bg) 52%, transparent); backdrop-filter: blur(12px); }
+  .input, .select, .textarea, .log { background-color: color-mix(in srgb, var(--surface) 62%, transparent); }
+  .btn:not(.primary):not(.ghost) { background: color-mix(in srgb, var(--surface-2) 62%, transparent); }
+  .seg, .vault-pill, .theme-chip { background: color-mix(in srgb, var(--surface-2) 50%, transparent); }
+  .modal, .tour-card { background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(18px) saturate(1.4); }
+}
+
+/* A boxed note inside a dialog (what a restore will replace). */
+.callout { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius: var(--radius-sm); background: var(--warn-wash); font-size: 13px; line-height: 1.45; }

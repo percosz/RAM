@@ -501,6 +501,32 @@ impl Vault {
     }
 }
 
+// ---- password sealing for the backup file -----------------------------------
+
+/// Seals `plain` with a key derived from `password` (Argon2id at the vault's
+/// cost): salt(16) || nonce(12) || ciphertext.
+pub(crate) fn password_seal(password: &str, plain: &[u8], entropy: &dyn Entropy) -> Result<Vec<u8>> {
+    let mut salt = [0u8; SALT_LEN];
+    entropy.fill(&mut salt);
+    let key = derive_key(password.as_bytes(), &salt, &Kdf::default())?;
+    let sealed = seal(&key, plain, entropy)?;
+    let mut out = Vec::with_capacity(SALT_LEN + sealed.len());
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&sealed);
+    Ok(out)
+}
+
+/// Opens a [`password_seal`] blob; a wrong password or a changed byte is a
+/// crypto error.
+pub(crate) fn password_open(password: &str, blob: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+    if blob.len() < SALT_LEN + NONCE_LEN + 16 {
+        return Err(VaultError::Crypto("short ciphertext".into()));
+    }
+    let (salt, sealed) = blob.split_at(SALT_LEN);
+    let key = derive_key(password.as_bytes(), salt, &Kdf::default())?;
+    open(&key, sealed)
+}
+
 // ---- crypto helpers --------------------------------------------------------
 
 fn random_key(entropy: &dyn Entropy) -> [u8; DEK_LEN] {

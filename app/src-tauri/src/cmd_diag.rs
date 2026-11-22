@@ -10,7 +10,9 @@
 
 use crate::state::{now, Shared};
 use ram_core::clientlog::{self, EndKind, LogFacts, Tail};
-use ram_core::model::{AccountId, CrashRecord};
+use ram_core::model::{AccountId, CrashRecord, Target};
+use ram_core::rejoin;
+use ram_core::roblox::LaunchTarget;
 use ram_core::platform::{JobApi, ProcKey, ProcessApi};
 use ram_core::redact::{redact, Level};
 use serde::Serialize;
@@ -53,6 +55,52 @@ pub struct Applied {
     pub last_trim: i64,
 }
 
+/// How an account last joined, as the user asked for it.
+#[derive(Clone)]
+pub struct LastLaunch {
+    pub target: LaunchTarget,
+    pub model_target: Target,
+    /// For a follow: the place this account went to before, used when the
+    /// followed user can no longer be joined.
+    pub fallback_place: Option<u64>,
+}
+
+impl LastLaunch {
+    /// The place this launch leads to, when it names one.
+    pub fn place(&self) -> Option<u64> {
+        match &self.target {
+            LaunchTarget::Place { place_id } | LaunchTarget::Server { place_id, .. } => Some(*place_id),
+            LaunchTarget::Follow { .. } => self.fallback_place,
+        }
+    }
+
+    /// The target for a rejoin attempt. The first attempt repeats the launch
+    /// exactly; later ones fall back to the place (a specific server may be
+    /// gone, a followed user may have left).
+    pub fn for_attempt(&self, fallback: bool) -> (LaunchTarget, Target) {
+        match (&self.target, fallback) {
+            (LaunchTarget::Server { place_id, .. }, true) => (LaunchTarget::Place { place_id: *place_id }, Target::Place { place_id: *place_id }),
+            (LaunchTarget::Follow { .. }, true) => match self.fallback_place {
+                Some(place_id) => (LaunchTarget::Place { place_id }, Target::Place { place_id }),
+                None => (self.target.clone(), self.model_target.clone()),
+            },
+            _ => (self.target.clone(), self.model_target.clone()),
+        }
+    }
+}
+
+/// Auto-rejoin progress for one account.
+#[derive(Clone, Default)]
+pub struct RejoinState {
+    /// Attempts since the last client that stayed up.
+    pub attempts: u32,
+    /// When the next attempt launches.
+    pub due: Option<i64>,
+    pub fallback: bool,
+    /// Set when an attempt launched, until its client is in a game.
+    pub awaiting_since: Option<i64>,
+}
+
 pub struct DiagState {
     pub watched: HashMap<ProcKey, Watch>,
     pub launches: Vec<PendingLaunch>,
@@ -62,11 +110,22 @@ pub struct DiagState {
     pub closing: Vec<u32>,
     /// Job objects behind the CPU limits.
     pub jobs: ram_win::WinJobs,
+    /// How each account last joined (this session), for auto-rejoin.
+    pub last_launch: HashMap<AccountId, LastLaunch>,
+    pub rejoin: HashMap<AccountId, RejoinState>,
 }
 
 impl Default for DiagState {
     fn default() -> Self {
-        DiagState { watched: HashMap::new(), launches: Vec::new(), reads: HashMap::new(), closing: Vec::new(), jobs: ram_win::WinJobs::new() }
+        DiagState {
+            watched: HashMap::new(),
+            launches: Vec::new(),
+            reads: HashMap::new(),
+            closing: Vec::new(),
+            jobs: ram_win::WinJobs::new(),
+            last_launch: HashMap::new(),
+            rejoin: HashMap::new(),
+        }
     }
 }
 
@@ -399,6 +458,44 @@ fn tick(app: &AppHandle) {
     }
     perform(acts);
 
+    // ---- auto-rejoin: clients that never got back in --------------------------
+    // (account, how it ended, how long it ran) for every ending this tick.
+    let mut ended: Vec<(AccountId, EndKind, i64)> = Vec::new();
+    let mut joined: Vec<AccountId> = Vec::new();
+    let mut stuck: Vec<(ProcKey, AccountId)> = Vec::new();
+    for key in &keys {
+        if !alive.contains(key) {
+            continue;
+        }
+        let Some(w) = s.diag.watched.get(key) else { continue };
+        let Some(acc) = w.account else { continue };
+        let Some(since) = s.diag.rejoin.get(&acc).and_then(|r| r.awaiting_since) else { continue };
+        if w.started + 5 < since {
+            continue; // an older client of the same account
+        }
+        if w.facts.in_game {
+            joined.push(acc);
+        } else if t - w.started > rejoin::JOIN_TIMEOUT_SECS {
+            stuck.push((*key, acc));
+        }
+    }
+    for acc in joined {
+        if let Some(r) = s.diag.rejoin.get_mut(&acc) {
+            r.awaiting_since = None;
+        }
+    }
+    // A rejoined client still not in a game (the server is gone, the
+    // followed user left) is closed, and the next attempt falls back.
+    for (key, acc) in stuck {
+        if let Some(r) = s.diag.rejoin.get_mut(&acc) {
+            r.awaiting_since = None;
+        }
+        s.diag.closing.push(key.pid);
+        let _ = s.procs.request_close(key);
+        s.log.info(&format!("rejoin: client {} did not get into a game in {} s; closing it", key.pid, rejoin::JOIN_TIMEOUT_SECS));
+        ended.push((acc, EndKind::Disconnected, 0));
+    }
+
     // Gone clients: classify and record.
     let gone: Vec<ProcKey> = keys.iter().copied().filter(|k| !alive.contains(k)).collect();
     let mut recorded = 0;
@@ -428,6 +525,9 @@ fn tick(app: &AppHandle) {
             w.facts.reason.as_deref().map(|r| format!(" — {r}")).unwrap_or_default()
         ));
         let Some(kind) = kind else { continue };
+        if let Some(id) = w.account {
+            ended.push((id, kind, uptime));
+        }
         if matches!(kind, EndKind::Closed | EndKind::Teleported) {
             continue;
         }
@@ -454,6 +554,36 @@ fn tick(app: &AppHandle) {
     if recorded > 0 {
         s.save();
     }
+
+    // ---- auto-rejoin: schedule, and launch what is due -------------------------
+    let mut notes: Vec<(AccountId, &'static str, String)> = Vec::new();
+    for (id, kind, uptime) in ended {
+        if let Some(note) = schedule_rejoin(&mut s, id, kind, uptime, t) {
+            notes.push(note);
+        }
+    }
+    let mut rejoins: Vec<(AccountId, LaunchTarget, Target)> = Vec::new();
+    let due: Vec<AccountId> = s.diag.rejoin.iter().filter(|(_, r)| r.due.is_some_and(|d| d <= t)).map(|(id, _)| *id).collect();
+    for id in due {
+        let Some(r) = s.diag.rejoin.get(&id).cloned() else { continue };
+        let enabled = s.store.settings.auto_rejoin && s.store.account(id).is_some() && !s.store.is_main(id);
+        let Some(last) = last_for(&s, id).filter(|_| enabled) else {
+            s.diag.rejoin.remove(&id);
+            continue;
+        };
+        // The client that ended may still be closing; give it a minute.
+        let running = s.diag.watched.values().any(|w| w.account == Some(id));
+        if running && t < r.due.unwrap_or(t) + 60 {
+            continue;
+        }
+        let (target, model) = last.for_attempt(r.fallback);
+        if let Some(st) = s.diag.rejoin.get_mut(&id) {
+            st.due = None;
+            st.awaiting_since = Some(t);
+        }
+        s.log.info(&format!("rejoin: launching account {id}, attempt {}{}", r.attempts, if r.fallback { " (fallback target)" } else { "" }));
+        rejoins.push((id, target, model));
+    }
     drop(s);
     if recorded > 0 {
         let _ = app.emit("crashes-changed", recorded);
@@ -465,6 +595,47 @@ fn tick(app: &AppHandle) {
     for id in seen_exited {
         let _ = app.emit("launch-status", crate::dto::LaunchEvent { account: id, state: "Exited".into(), message: String::new() });
         let _ = app.emit("account-updated", id);
+    }
+    // After "Exited", so the rejoin line is what stays on the row.
+    for (id, state, message) in notes {
+        let _ = app.emit("launch-status", crate::dto::LaunchEvent { account: id, state: state.into(), message });
+    }
+    for (id, target, model) in rejoins {
+        crate::cmd_launch::rejoin_launch(app.clone(), id, target, model);
+    }
+}
+
+/// How `id` last joined: what was recorded this session, else (after RAM
+/// was restarted while clients kept running) the place of its most recent
+/// launch from the saved history.
+fn last_for(s: &crate::state::AppState, id: AccountId) -> Option<LastLaunch> {
+    if let Some(l) = s.diag.last_launch.get(&id) {
+        return Some(l.clone());
+    }
+    let recent = s.store.recent.iter().filter(|r| r.account == id).max_by_key(|r| r.at)?;
+    let target = ram_core::roblox::launch_target(&recent.target)?;
+    Some(LastLaunch { target, model_target: recent.target.clone(), fallback_place: None })
+}
+
+/// Decides whether the account whose client just ended is launched again
+/// and records when. Returns the line to show on its row.
+fn schedule_rejoin(s: &mut crate::state::AppState, id: AccountId, kind: EndKind, uptime: i64, t: i64) -> Option<(AccountId, &'static str, String)> {
+    if !s.store.settings.auto_rejoin || s.store.is_main(id) || s.store.account(id).is_none() || last_for(s, id).is_none() {
+        return None;
+    }
+    let max = s.store.settings.rejoin_max.clamp(1, 20);
+    let so_far = s.diag.rejoin.get(&id).map(|r| r.attempts).unwrap_or(0);
+    match rejoin::plan(kind, uptime, so_far, max) {
+        Some(p) => {
+            s.diag.rejoin.insert(id, RejoinState { attempts: p.attempt, due: Some(t + p.delay_secs as i64), fallback: p.fallback, awaiting_since: None });
+            s.log.info(&format!("rejoin: account {id} ended ({kind:?}); attempt {} of {max} in {} s", p.attempt, p.delay_secs));
+            Some((id, "Launching", format!("{}. Rejoining in {} s (attempt {} of {max})…", clientlog::kind_label(kind), p.delay_secs, p.attempt)))
+        }
+        None if rejoin::gave_up(kind, uptime, so_far, max) => {
+            s.log.warn(&format!("rejoin: account {id} ended again ({kind:?}); giving up after {max} attempts"));
+            Some((id, "Failed", format!("Stopped rejoining after {max} attempts. Launch it again to start over.")))
+        }
+        None => None,
     }
 }
 
@@ -660,4 +831,34 @@ pub fn diagnostics_text(state: State<'_, Shared>) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod rejoin_tests {
+    use super::*;
+
+    fn last(target: LaunchTarget, fallback_place: Option<u64>) -> LastLaunch {
+        LastLaunch { model_target: Target::Place { place_id: 0 }, target, fallback_place }
+    }
+
+    #[test]
+    fn first_attempt_repeats_the_launch_and_later_ones_fall_back() {
+        let server = last(LaunchTarget::Server { place_id: 7, job_id: "j".into() }, None);
+        assert_eq!(server.for_attempt(false).0, LaunchTarget::Server { place_id: 7, job_id: "j".into() });
+        assert_eq!(server.for_attempt(true), (LaunchTarget::Place { place_id: 7 }, Target::Place { place_id: 7 }));
+        assert_eq!(server.place(), Some(7));
+
+        let follow = last(LaunchTarget::Follow { user_id: 99 }, Some(7));
+        assert_eq!(follow.for_attempt(false).0, LaunchTarget::Follow { user_id: 99 });
+        assert_eq!(follow.for_attempt(true).0, LaunchTarget::Place { place_id: 7 });
+        assert_eq!(follow.place(), Some(7));
+
+        // Nothing to fall back to: keep following.
+        let blind = last(LaunchTarget::Follow { user_id: 99 }, None);
+        assert_eq!(blind.for_attempt(true).0, LaunchTarget::Follow { user_id: 99 });
+        assert_eq!(blind.place(), None);
+
+        let place = last(LaunchTarget::Place { place_id: 7 }, None);
+        assert_eq!(place.for_attempt(true).0, LaunchTarget::Place { place_id: 7 });
+    }
 }
