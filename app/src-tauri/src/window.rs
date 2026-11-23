@@ -35,8 +35,9 @@ pub fn backdrop_for(wanted: &str, build: u32) -> &'static str {
 
 /// Creates the main window from the configuration and returns the backdrop
 /// it was given ("" for the normal opaque window).
-pub fn create_main(app: &AppHandle, wanted: &str, build: u32) -> tauri::Result<&'static str> {
+pub fn create_main(app: &AppHandle, wanted: &str, build: u32, always_on_top: bool) -> tauri::Result<&'static str> {
     let mut config = app.config().app.windows.first().cloned().unwrap_or_default();
+    config.always_on_top = always_on_top;
     let backdrop = backdrop_for(wanted, build);
     if !backdrop.is_empty() {
         // No background colour at all: Windows ignores the alpha of a window
@@ -64,6 +65,13 @@ pub fn create_main(app: &AppHandle, wanted: &str, build: u32) -> tauri::Result<&
 pub fn set_window_theme(app: AppHandle, dark: bool) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.set_theme(Some(if dark { Theme::Dark } else { Theme::Light }));
+    }
+}
+
+/// Keeps the main window above every other window, or lets it go back.
+pub fn set_always_on_top(app: &AppHandle, on: bool) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_always_on_top(on);
     }
 }
 

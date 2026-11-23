@@ -595,6 +595,8 @@ pub struct Settings {
     /// effect at the next start, because the window has to be created
     /// see-through.
     pub backdrop: String,
+    /// Keep RAM's window above every other window.
+    pub always_on_top: bool,
     /// How much of the theme's colour covers the desktop when a backdrop is
     /// on, in percent (lower is more see-through).
     #[serde(default = "default_backdrop_tint")]
@@ -638,6 +640,7 @@ impl Default for Settings {
             check_every_hours: 0,
             presence_every_secs: default_presence_secs(),
             backdrop: String::new(),
+            always_on_top: false,
             backdrop_tint: default_backdrop_tint(),
             browser: String::new(),
             window: None,

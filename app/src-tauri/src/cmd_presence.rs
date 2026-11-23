@@ -11,6 +11,7 @@
 use crate::state::{now, Shared};
 use ram_core::model::AccountId;
 use ram_core::presence::{self, Presence, PresenceError, PresenceKind};
+use ram_core::roblox_profile;
 use ram_win::WinHttp;
 use serde::Serialize;
 use std::time::Duration;
@@ -23,6 +24,9 @@ const MAX_EVERY_SECS: u64 = 300;
 const MAX_BACKOFF_SECS: u64 = 600;
 /// Accounts asked at the same time.
 const PARALLEL: usize = 6;
+/// Each account's Robux balance is asked again this often (and right after
+/// one of its clients closes).
+const ROBUX_EVERY_SECS: i64 = 120;
 /// The stored last-online time is rewritten to disk at most this often
 /// while an account stays online.
 const SAVE_EVERY_SECS: i64 = 600;
@@ -52,6 +56,8 @@ struct Ask {
     id: AccountId,
     user_id: u64,
     cookie: Option<String>,
+    /// Ask for the Robux balance too this round.
+    robux_due: bool,
 }
 
 /// Asks Roblox about `ids` (every account when `None`) and records the
@@ -63,33 +69,47 @@ fn check(app: &AppHandle, ids: Option<&[AccountId]>) -> (Vec<(AccountId, Presenc
         let wanted: Vec<(AccountId, u64)> =
             s.store.accounts.iter().filter(|a| ids.is_none_or(|l| l.contains(&a.id))).filter_map(|a| a.roblox_user_id.map(|u| (a.id, u))).collect();
         let unlocked = s.vault.is_unlocked();
+        let t = now();
         wanted
             .into_iter()
-            .map(|(id, user_id)| Ask { id, user_id, cookie: if unlocked { s.vault.secret(id).ok().flatten().map(|c| c.to_string()) } else { None } })
+            .map(|(id, user_id)| {
+                let cookie = if unlocked { s.vault.secret(id).ok().flatten().map(|c| c.to_string()) } else { None };
+                let robux_due = cookie.is_some() && s.robux_checked.get(&id).is_none_or(|at| t - at >= ROBUX_EVERY_SECS);
+                Ask { id, user_id, cookie, robux_due }
+            })
             .collect()
     };
     if asks.is_empty() {
         return (Vec::new(), false);
     }
     let mut results: Vec<(AccountId, Presence)> = Vec::new();
+    // Robux answers: Some(balance), or None when the request failed.
+    let mut balances: Vec<(AccountId, Option<i64>)> = Vec::new();
     let mut limited = false;
 
     // Signed in: each account about itself, a few at a time.
     let (own, anonymous): (Vec<&Ask>, Vec<&Ask>) = asks.iter().partition(|a| a.cookie.is_some());
     for group in own.chunks(PARALLEL) {
-        let answers: Vec<(AccountId, Result<Vec<(u64, Presence)>, PresenceError>)> = std::thread::scope(|scope| {
+        type Answer = (AccountId, Result<Vec<(u64, Presence)>, PresenceError>, Option<Option<i64>>);
+        let answers: Vec<Answer> = std::thread::scope(|scope| {
             let handles: Vec<_> = group
                 .iter()
                 .map(|a| {
                     scope.spawn(move || {
                         let http = WinHttp::new();
-                        (a.id, presence::fetch(&http, a.cookie.as_deref(), &[a.user_id]))
+                        let p = presence::fetch(&http, a.cookie.as_deref(), &[a.user_id]);
+                        let robux = (a.robux_due && !matches!(p, Err(PresenceError::RateLimited)))
+                            .then(|| a.cookie.as_deref().and_then(|c| roblox_profile::robux(&http, c, a.user_id).ok()));
+                        (a.id, p, robux)
                     })
                 })
                 .collect();
             handles.into_iter().filter_map(|h| h.join().ok()).collect()
         });
-        for (id, answer) in answers {
+        for (id, answer, robux) in answers {
+            if let Some(r) = robux {
+                balances.push((id, r));
+            }
             match answer {
                 Ok(list) => {
                     if let Some((_, p)) = list.into_iter().next() {
@@ -141,6 +161,16 @@ fn check(app: &AppHandle, ids: Option<&[AccountId]>) -> (Vec<(AccountId, Presenc
                         save = true;
                     }
                     a.last_online = Some(t);
+                }
+            }
+        }
+        for (id, balance) in balances {
+            s.robux_checked.insert(id, t);
+            if let (Some(v), Some(a)) = (balance, s.store.account_mut(id)) {
+                if a.robux != Some(v) {
+                    a.robux = Some(v);
+                    save = true;
+                    changed = true;
                 }
             }
         }

@@ -4,7 +4,7 @@ use crate::dto::{self, AccountPatch, AccountView, Snapshot};
 use crate::state::{now, Shared};
 use ram_core::model::{Account, AccountId, Settings};
 use ram_core::signin;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 fn lock<'a>(state: &'a State<'_, Shared>) -> Result<std::sync::MutexGuard<'a, crate::state::AppState>, String> {
     state.lock().map_err(|_| "application state is unavailable".to_string())
@@ -115,9 +115,12 @@ pub fn reorder_accounts(state: State<'_, Shared>, ids: Vec<AccountId>) -> Result
 }
 
 #[tauri::command]
-pub fn set_settings(state: State<'_, Shared>, settings: Settings) -> Result<Settings, String> {
+pub fn set_settings(app: AppHandle, state: State<'_, Shared>, settings: Settings) -> Result<Settings, String> {
     let mut s = lock(&state)?;
     let multi_changed = s.store.settings.multi_instance != settings.multi_instance;
+    if s.store.settings.always_on_top != settings.always_on_top {
+        crate::window::set_always_on_top(&app, settings.always_on_top);
+    }
     s.store.settings = settings;
     if multi_changed {
         s.apply_multi_instance();

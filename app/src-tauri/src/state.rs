@@ -28,6 +28,8 @@ pub struct AppState {
     pub diag: crate::cmd_diag::DiagState,
     /// The username:password sign-in queue.
     pub signin_queue: crate::cmd_add::SignInQueue,
+    /// When each account's Robux balance was last asked (not saved).
+    pub robux_checked: std::collections::HashMap<AccountId, i64>,
     /// Presence as last answered by Roblox, per account (not saved).
     pub presence: std::collections::HashMap<AccountId, crate::cmd_presence::PresenceInfo>,
     /// The backdrop the window was created with ("", "mica" or "acrylic").
@@ -111,6 +113,7 @@ impl AppState {
             diag: Default::default(),
             signin_queue: Default::default(),
             presence: Default::default(),
+            robux_checked: Default::default(),
             backdrop: "",
             windows_build: 0,
         };

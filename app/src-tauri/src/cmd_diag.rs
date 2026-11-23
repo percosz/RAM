@@ -509,6 +509,7 @@ fn tick(app: &AppHandle) {
             if let Some(a) = s.store.account_mut(id) {
                 a.last_online = Some(t);
             }
+            s.robux_checked.remove(&id);
         }
         s.diag.closing.retain(|p| *p != key.pid);
         if let Some(b) = &w.browser_tracker_id {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { GraduationCap } from "lucide-react";
 import { open as pickDialog } from "@tauri-apps/plugin-dialog";
-import { api, type BrowserChoice, type GraphicsSettings, type Msaa, type RenderMode, type Texture, type ThemeKind } from "../api";
+import { api, type BrowserChoice, type GraphicsSettings, type LimitSettings, type Msaa, type RenderMode, type Texture, type ThemeKind } from "../api";
 import { Btn, Field, Toggle } from "../components";
 import { FIXED_CORNERS, useApp } from "../store";
 import { BackupDialog, ChangePasswordDialog, ConfirmDialog, ImportDialog, RestoreDialog, VaultSetupDialog } from "../dialogs";
@@ -69,10 +69,17 @@ function Switch({ checked, onChange, disabled }: { checked: boolean; onChange: (
 
 /** Max alts / Balanced / Roblox defaults, modelled on RoALT's presets. */
 const PRESETS: Record<"max" | "balanced" | "defaults", Partial<GraphicsSettings>> = {
-  max: { enabled: true, fps_cap: 10, low_graphics: true, lighter_rendering: true, render: { msaa: "X1", texture: "Lowest", mode: "Default", gray_sky: true, no_grass: true, lowest_frm: true, pause_voxelizer: true } },
+  max: { enabled: true, fps_cap: 5, low_graphics: true, lighter_rendering: true, render: { msaa: "X1", texture: "Lowest", mode: "Default", gray_sky: true, no_grass: true, lowest_frm: true, pause_voxelizer: true } },
   balanced: { enabled: true, fps_cap: 30, low_graphics: true, lighter_rendering: true, render: { msaa: "X1", texture: "Lowest", mode: "Default", gray_sky: false, no_grass: true, lowest_frm: true, pause_voxelizer: false } },
   defaults: { enabled: false, fps_cap: 0, low_graphics: false, lighter_rendering: false, mute_volume: false },
 };
+
+/** The 23S preset: Max alts graphics plus these limits for running clients,
+ *  for a lot of alts at once. */
+const LIMITS_23S: Partial<LimitSettings> = { minimize_on_launch: true, tiny_on_launch: true, cpu_limit_percent: 5, efficiency_mode: true, trim_every_min: 5 };
+function is23s(l: LimitSettings): boolean {
+  return (Object.keys(LIMITS_23S) as Array<keyof LimitSettings>).every((k) => l[k] === LIMITS_23S[k]);
+}
 
 /** Which preset the current settings match, or "custom". */
 function presetOf(g: GraphicsSettings): "max" | "balanced" | "defaults" | "custom" {
@@ -142,7 +149,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
               </div>
             </div>
           ))}
-          <div className="kv">
+          <div className="kv" data-tour="backdrop">
             <span>Window backdrop</span>
             <Seg sm value={settings.backdrop} options={[["", "Solid"], ["clear", "Clear"], ["mica", "Mica"], ["acrylic", "Acrylic"]]} onChange={(b) => saveSettings({ backdrop: b })} />
             <span />
@@ -175,6 +182,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             <span />
             <div className="hint">Compact shows one line per account; the others show the alias and description underneath.</div>
           </div>
+          <Toggle checked={settings.always_on_top} onChange={(c) => saveSettings({ always_on_top: c })} label="Always on top" hint="Keeps RAM's window above every other window, Roblox clients included, until you turn this off. A game in exclusive fullscreen still covers it." />
           <Toggle checked={settings.hide_usernames} onChange={(c) => saveSettings({ hide_usernames: c })} label="Hide names" hint="For screenshots and streams: usernames and aliases show only their first three characters, and avatars, Robux and user IDs are hidden." />
           <div className="kv">
             <span>Corners</span>
@@ -193,6 +201,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             <input className="input" type="number" min={0} max={120} value={settings.launch_spacing_secs} onChange={(e) => saveSettings({ launch_spacing_secs: Math.max(0, Math.min(120, Number(e.target.value) || 0)) })} />
           </div>
           <Toggle checked={settings.include_main_in_batch} onChange={(c) => saveSettings({ include_main_in_batch: c })} label="Include Main in Select All" />
+          <div className="stack" data-tour="rejoin">
           <Toggle checked={settings.auto_rejoin} onChange={(c) => saveSettings({ auto_rejoin: c })} label="Rejoin when a client is disconnected or crashes"
             hint="Launches the alt again the way it last joined: the same server, the same place, or the user it followed. If that does not get it back in, it goes to the place instead. Not when you close a client yourself, not when another sign-in replaced it, and never Main." />
           {settings.auto_rejoin && (
@@ -215,6 +224,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             <span />
             <div className="hint">Re-checks every stored cookie on that schedule and tells you which accounts need signing in again.</div>
           </div>
+          </div>
           <div className="kv">
             <span>Browser</span>
             <select className="select" value={settings.browser} onChange={(e) => saveSettings({ browser: e.target.value })}>
@@ -229,7 +239,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
       </section>
 
       <section className="card wide">
-        <div className="card-h">Performance — alt clients</div>
+        <div className="card-h">Performance and running clients — alts</div>
         <div className="card-b">
           <div className="hint">
             Lower each alt client's FPS and graphics. The FPS cap and quality go into Roblox's own settings file; rendering flags go into the FastFlag file {snap.launcher_name === "Roblox" ? "next to the client" : `${snap.launcher_name} applies at launch`}. Both are written just before a client starts and put back as soon as it has read them, so your own Roblox keeps its settings.
@@ -239,7 +249,8 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             <div className="seg" data-tour="perf">
               <button type="button" className={preset === "defaults" ? "active" : ""} onClick={() => saveGraphics(PRESETS.defaults)}>Roblox defaults (off)</button>
               <button type="button" className={preset === "balanced" ? "active" : ""} onClick={() => saveGraphics(PRESETS.balanced)}>Balanced (30 FPS)</button>
-              <button type="button" className={preset === "max" ? "active" : ""} onClick={() => saveGraphics(PRESETS.max)}>Max alts (10 FPS, lowest)</button>
+              <button type="button" className={preset === "max" && !is23s(lim) ? "active" : ""} onClick={() => saveGraphics(PRESETS.max)}>Max alts (5 FPS, lowest)</button>
+              <button type="button" className={preset === "max" && is23s(lim) ? "active" : ""} title="Max alts, plus: minimize on launch, start tiny, 5% CPU in the background, efficiency mode and memory trim every 5 minutes." onClick={async () => { await saveGraphics(PRESETS.max); await saveLimits(LIMITS_23S); }}>23S (many alts)</button>
               {preset === "custom" && <button type="button" className="active">Your own mix</button>}
             </div>
           </div>
@@ -289,12 +300,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
               </div>
             )}
           </div>
-        </div>
-      </section>
-
-      <section className="card wide">
-        <div className="card-h">Running clients — windows, sound, CPU, memory, network</div>
-        <div className="card-b">
+          <div className="sub-h">Running clients: windows, sound, CPU, memory, network</div>
           <div className="hint">Applied to alt clients while they run, never to Main or Full quality accounts, and only to clients RAM can tie to an account. Everything is off until you turn it on.</div>
           <div>
             <PerfRow label="Minimize on launch" hint="Each alt client minimizes once it has joined a game, without stealing your focus.">
@@ -356,7 +362,7 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
         </div>
       </section>
 
-      <section className="card">
+      <section className="card" data-tour="data">
         <div className="card-h">Data</div>
         <div className="card-b">
           <div className="row"><Btn onClick={() => setDlg("import")}>Import from AccountData.json…</Btn><Btn onClick={exportNow}>Export AccountData.json…</Btn></div>
