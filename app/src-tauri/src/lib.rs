@@ -102,8 +102,8 @@ pub fn run() {
             // The window is created here, not from the configuration, so it
             // can be made see-through when a backdrop is turned on.
             let build = ram_win::launcher_info::windows_build();
-            let wanted = app.state::<Shared>().lock().map(|s| s.store.settings.backdrop.clone()).unwrap_or_default();
-            let backdrop = window::create_main(app.handle(), &wanted, build)?;
+            let (wanted, on_top) = app.state::<Shared>().lock().map(|s| (s.store.settings.backdrop.clone(), s.store.settings.always_on_top)).unwrap_or_default();
+            let backdrop = window::create_main(app.handle(), &wanted, build, on_top)?;
             if let Ok(mut s) = app.state::<Shared>().lock() {
                 s.backdrop = backdrop;
                 s.windows_build = build;

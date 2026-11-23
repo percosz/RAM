@@ -55,6 +55,14 @@ type Dialog =
   | { kind: "newGroup"; ids: number[] }
   | { kind: "busy"; ids: number[]; busy: Array<{ id: number; where: string }>; go: (ids: number[]) => Promise<void> };
 
+/** A launch-bar field as it was left (this PC only). */
+function recall(key: string, fallback: string): string {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+function keep(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* not remembered */ }
+}
+
 /** The row's last column: who is on the account right now, else when it was last online. */
 function seen(a: Account): { text: string; cls: "" | "accent" | "warn" | "good"; title: string } {
   const p = a.presence;
@@ -78,9 +86,14 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("");
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [placeId, setPlaceId] = useState(String(ROGUE_LINEAGE));
-  const [jobId, setJobId] = useState("");
-  const [follow, setFollow] = useState("");
+  // Kept across tab switches and restarts (this view is rebuilt each time
+  // you come back to it).
+  const [placeId, setPlaceId] = useState(() => recall("ram.place", String(ROGUE_LINEAGE)));
+  const [jobId, setJobId] = useState(() => recall("ram.job", ""));
+  const [follow, setFollow] = useState(() => recall("ram.follow", ""));
+  useEffect(() => { keep("ram.place", placeId); }, [placeId]);
+  useEffect(() => { keep("ram.job", jobId); }, [jobId]);
+  useEffect(() => { keep("ram.follow", follow); }, [follow]);
   const [menu, setMenu] = useState<null | { x: number; y: number; ids: number[] }>(null);
   const [placesMenu, setPlacesMenu] = useState<null | { x: number; y: number }>(null);
   const [asking, setAsking] = useState(false);
@@ -350,6 +363,39 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
     }
   })();
 
+  // Menus and dialogs.
+  const overlays = (
+    <>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.ids)} onClose={() => setMenu(null)} />}
+      {dialog?.kind === "busy" && (() => {
+        const d = dialog;
+        const rest = d.ids.filter((id) => !d.busy.some((b) => b.id === id));
+        const one = d.busy.length === 1;
+        return (
+          <Modal title={one ? "This account is in a game" : `${d.busy.length} accounts are in a game`} onClose={() => setDialog(null)}
+            footer={<>
+              <Btn onClick={() => setDialog(null)}>Cancel</Btn>
+              {rest.length > 0 && <Btn onClick={() => { setDialog(null); void d.go(rest); }}>Skip {one ? "it" : "them"}, launch the other {rest.length}</Btn>}
+              <Btn kind="primary" onClick={() => { setDialog(null); void d.go(d.ids); }}>Launch anyway</Btn>
+            </>}>
+            <p style={{ margin: 0 }}>{one ? "This account is" : "These accounts are"} being played right now:</p>
+            <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+              {d.busy.map((b) => <li key={b.id}><b>{nameOf(accounts.find((a) => a.id === b.id)?.username ?? "")}</b> <span className="muted">· {b.where}</span></li>)}
+            </ul>
+            <p className="muted" style={{ margin: 0 }}>Launching {one ? "it" : "them"} here signs the account in again, and Roblox disconnects the session that is already playing.</p>
+          </Modal>
+        );
+      })()}
+      {placesMenu && <ContextMenu x={placesMenu.x} y={placesMenu.y} items={placeItems} onClose={() => setPlacesMenu(null)} />}
+      {dialog?.kind === "add" && <AddAccountDialog onClose={() => setDialog(null)} onImport={() => setDialog({ kind: "import" })} />}
+      {dialog?.kind === "import" && <ImportDialog onClose={() => setDialog(null)} />}
+      {dialog?.kind === "copyCookie" && <RevealCookieDialog id={dialog.id} what={dialog.what} name={nameOf(accounts.find((a) => a.id === dialog.id)?.username ?? "")} needPassword onClose={() => setDialog(null)} />}
+      {dialog?.kind === "newGroup" && <NewGroupDialog onClose={() => setDialog(null)} onCreate={(g) => setGroupOf(dialog.ids, g)} />}
+      {dialog?.kind === "remove" && <ConfirmDialog danger title="Remove account" text={`Remove ${dialog.ids.length === 1 ? nameOf(accounts.find((a) => a.id === dialog.ids[0])?.username ?? "") : dialog.ids.length + " accounts"} from RAM? Any stored cookie is deleted from this PC; the Roblox account itself is not affected.`} onYes={() => remove(dialog.ids)} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "removeCookie" && <ConfirmDialog danger title="Remove cookie" text="Delete the stored cookie for this account? The account stays in the list." onYes={async () => { await api.cookieRemove(dialog.id); await refresh(); }} onClose={() => setDialog(null)} />}
+    </>
+  );
+
   return (
     <div className={`accounts ${drag?.active ? "dragging" : ""}`}>
       <div className="toolbar">
@@ -449,33 +495,7 @@ export function AccountsView({ onNeedUnlock }: { onNeedUnlock: () => void }) {
         <div className="lhint">{placeHint}{selected.length > 0 && <span className="muted"> · {selected.length} selected</span>}</div>
       </div>
 
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.ids)} onClose={() => setMenu(null)} />}
-      {dialog?.kind === "busy" && (() => {
-        const d = dialog;
-        const rest = d.ids.filter((id) => !d.busy.some((b) => b.id === id));
-        const one = d.busy.length === 1;
-        return (
-          <Modal title={one ? "This account is in a game" : `${d.busy.length} accounts are in a game`} onClose={() => setDialog(null)}
-            footer={<>
-              <Btn onClick={() => setDialog(null)}>Cancel</Btn>
-              {rest.length > 0 && <Btn onClick={() => { setDialog(null); void d.go(rest); }}>Skip {one ? "it" : "them"}, launch the other {rest.length}</Btn>}
-              <Btn kind="primary" onClick={() => { setDialog(null); void d.go(d.ids); }}>Launch anyway</Btn>
-            </>}>
-            <p style={{ margin: 0 }}>{one ? "This account is" : "These accounts are"} being played right now:</p>
-            <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
-              {d.busy.map((b) => <li key={b.id}><b>{nameOf(accounts.find((a) => a.id === b.id)?.username ?? "")}</b> <span className="muted">· {b.where}</span></li>)}
-            </ul>
-            <p className="muted" style={{ margin: 0 }}>Launching {one ? "it" : "them"} here signs the account in again, and Roblox disconnects the session that is already playing.</p>
-          </Modal>
-        );
-      })()}
-      {placesMenu && <ContextMenu x={placesMenu.x} y={placesMenu.y} items={placeItems} onClose={() => setPlacesMenu(null)} />}
-      {dialog?.kind === "add" && <AddAccountDialog onClose={() => setDialog(null)} onImport={() => setDialog({ kind: "import" })} />}
-      {dialog?.kind === "import" && <ImportDialog onClose={() => setDialog(null)} />}
-      {dialog?.kind === "copyCookie" && <RevealCookieDialog id={dialog.id} what={dialog.what} name={nameOf(accounts.find((a) => a.id === dialog.id)?.username ?? "")} needPassword onClose={() => setDialog(null)} />}
-      {dialog?.kind === "newGroup" && <NewGroupDialog onClose={() => setDialog(null)} onCreate={(g) => setGroupOf(dialog.ids, g)} />}
-      {dialog?.kind === "remove" && <ConfirmDialog danger title="Remove account" text={`Remove ${dialog.ids.length === 1 ? nameOf(accounts.find((a) => a.id === dialog.ids[0])?.username ?? "") : dialog.ids.length + " accounts"} from RAM? Any stored cookie is deleted from this PC; the Roblox account itself is not affected.`} onYes={() => remove(dialog.ids)} onClose={() => setDialog(null)} />}
-      {dialog?.kind === "removeCookie" && <ConfirmDialog danger title="Remove cookie" text="Delete the stored cookie for this account? The account stays in the list." onYes={async () => { await api.cookieRemove(dialog.id); await refresh(); }} onClose={() => setDialog(null)} />}
+      {overlays}
     </div>
   );
 }

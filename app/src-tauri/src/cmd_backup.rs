@@ -126,7 +126,7 @@ pub fn backup_inspect(path: String, password: String) -> Result<BackupInfo, Stri
 
 /// Replaces the account list, settings and stored secrets with a backup.
 #[tauri::command(async)]
-pub fn backup_restore(state: State<'_, Shared>, path: String, password: String) -> Result<String, String> {
+pub fn backup_restore(app: AppHandle, state: State<'_, Shared>, path: String, password: String) -> Result<String, String> {
     let b = read_backup(&path, &password)?;
     let summary = info(&b);
     let mut s = lock(&state)?;
@@ -172,6 +172,7 @@ pub fn backup_restore(state: State<'_, Shared>, path: String, password: String) 
     s.diag.last_launch.clear();
     s.diag.rejoin.clear();
     s.apply_multi_instance();
+    crate::window::set_always_on_top(&app, s.store.settings.always_on_top);
     s.save();
     s.log.info(&format!("backup: restored {} accounts, {} cookies, {} passwords", summary.accounts, summary.cookies, summary.passwords));
     Ok(format!(

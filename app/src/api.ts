@@ -78,6 +78,8 @@ export interface Settings {
   presence_every_secs: number;
   /** Wanted window backdrop: "" | "clear" | "mica" | "acrylic" (applies at the next start). */
   backdrop: string;
+  /** Keep RAM's window above every other window. */
+  always_on_top: boolean;
   /** Percent of the theme's colour over the desktop when a backdrop is on. */
   backdrop_tint: number;
   /** "" follows the Windows default browser; otherwise a browser's full path. */

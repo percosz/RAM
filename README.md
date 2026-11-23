@@ -86,8 +86,9 @@ auto-updater verifies every update against RAM's own release signature.
   quality, paused lighting) plus your own FastFlags, written just before each
   alt client starts and put back once it has read them. Per-account FPS cap
   and *Full quality*; the **Main** account is never touched. Presets: Roblox
-  defaults (the starting point, nothing is written), Balanced, Max alts.
-  Volume 0 is an option.
+  defaults (the starting point, nothing is written), Balanced (30 FPS), Max
+  alts (5 FPS, lowest) and **23S**, which adds the running-client limits for
+  a lot of alts at once. Volume 0 is an option.
 - **Running clients.** Minimize on launch, tiny windows, mute, a background
   CPU limit, efficiency mode and memory trim for alt clients, all off until
   you turn them on and never applied to Main or Full quality accounts. A

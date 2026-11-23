@@ -174,3 +174,9 @@
 /* The first launch-bar group gained the saved-places button: give it the
    room it needs so the Follow group wraps instead of being overlapped. */
 .launchbar .lgroup:first-child { flex: 3 1 410px; }
+
+/* A vertical group inside a settings card (also a tutorial anchor). */
+.stack { display: flex; flex-direction: column; gap: 12px; }
+
+/* A heading inside a settings card. */
+.sub-h { margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }

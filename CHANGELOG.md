@@ -4,6 +4,21 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## Unreleased
+
+### New
+- **Always on top** (Settings → Appearance): keeps RAM's window above every other window, Roblox clients included.
+- **23S preset** (Settings → Performance): Max alts graphics plus, for running alt clients, minimize on launch, start tiny, 5% CPU in the background, efficiency mode and memory trim every 5 minutes. One click for running a lot of alts.
+- **The tutorial covers the newer features**: in game / online, saved places, the in-game warning, resizing, auto-rejoin, themes and the see-through window, and backups (Settings → Tutorial).
+
+### Changed
+- **Max alts** caps alts at **5 FPS** (was 10).
+- **Performance** and **Running clients** are one card in Settings.
+
+### Fixed
+- **Robux went stale.** The balance was only read during a sign-in check. It is now asked again every 2 minutes for every account with a stored cookie, and right after one of its clients closes.
+- **The username to follow (and the Place ID and Job ID) were cleared** when you switched to another tab and back. They are now kept, also across restarts.
+
 ## 0.6.3 (2026-11-22)
 
 ### Fixed

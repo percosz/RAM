@@ -4,7 +4,7 @@
 // nothing is changed by accident.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, Gauge, ListChecks, PanelRight, PartyPopper, Play, ShieldCheck, Sparkles, Stethoscope, UserPlus } from "lucide-react";
+import { Activity, Archive, Gauge, ListChecks, Palette, PanelRight, PartyPopper, Play, RotateCcw, ShieldCheck, Sparkles, Stethoscope, UserPlus } from "lucide-react";
 import { Btn } from "../components";
 
 export type TourView = "accounts" | "clients" | "diagnostics" | "settings";
@@ -46,6 +46,7 @@ const STEPS: Step[] = [
     body: <>
       <p>Each row shows the avatar, username, alias and whether the sign-in is still valid.</p>
       <ul>
+        <li>The last column and a dot on the avatar show who is <b>in game</b> (here or on another device) or <b>online</b> right now, checked with Roblox regularly; otherwise when the account was last online.</li>
         <li><b>Tick boxes</b> pick several accounts.</li>
         <li><b>Drag</b> a row to reorder.</li>
         <li><b>Right-click</b> for the rest: copy the cookie or password, set as Main, move to a group, remove.</li>
@@ -58,7 +59,8 @@ const STEPS: Step[] = [
     title: "Join a game",
     body: <>
       <p>Type a <b>Place ID</b> (RAM shows the game's name), tick the accounts and press <b>Join Server</b>. They start one after another.</p>
-      <p><b>Follow</b> joins the server a user is playing in.</p>
+      <p><b>Follow</b> joins the server a user is playing in. The bookmark button keeps your <b>saved places</b> one click away.</p>
+      <p>If an account is already playing somewhere, RAM asks before launching it.</p>
     </>,
   },
   {
@@ -67,6 +69,7 @@ const STEPS: Step[] = [
     body: <>
       <p>Click an account to open it here: alias and description, its own FPS cap, <b>Check</b> the sign-in, and <b>Open Browser</b> signed in as that account in your own browser.</p>
       <p>Mark your own account as <b>Main</b>. Main is left out of Select All and is never slowed down.</p>
+      <p>Drag the edge of this pane, or of the sidebar, to resize them.</p>
     </>,
   },
   {
@@ -80,12 +83,35 @@ const STEPS: Step[] = [
     body: <p><b>Crash history</b> records why a client ended: disconnected by Roblox, crashed, or replaced by another sign-in, with the reason and how long it ran. The <b>debug log</b> is here too.</p>,
   },
   {
+    view: "settings", target: ["rejoin"], scroll: true, icon: <RotateCcw />,
+    title: "Rejoin and checks",
+    body: <ul>
+      <li><b>Auto-rejoin</b>: when an alt is disconnected or crashes, RAM launches it again the way it last joined. Never Main, never a client you closed.</li>
+      <li>How often RAM asks Roblox who is <b>in game</b>.</li>
+      <li>A <b>scheduled sign-in check</b> that tells you which accounts need signing in again.</li>
+    </ul>,
+  },
+  {
     view: "settings", target: ["perf"], scroll: true, icon: <Gauge />,
     title: "Make alts lighter",
     body: <>
       <p>Pick a preset to cap the FPS and lower the graphics of alt clients. Your own Roblox settings are put back right after each launch.</p>
       <p>Further down, <b>Running clients</b> can minimize, shrink or mute alts when they start and limit their CPU in the background. Main is always left alone.</p>
     </>,
+  },
+  {
+    view: "settings", target: ["backdrop"], scroll: true, icon: <Palette />,
+    title: "Make it yours",
+    body: <ul>
+      <li>Nearly thirty <b>themes</b>, from palettes to Windows XP, Vista and Frutiger Aero.</li>
+      <li>A <b>see-through window</b>, with a slider for how much shows through.</li>
+      <li><b>Always on top</b> and <b>Hide names</b> are in the same place.</li>
+    </ul>,
+  },
+  {
+    view: "settings", target: ["data"], scroll: true, icon: <Archive />,
+    title: "Keep a backup",
+    body: <p><b>Back up everything</b> writes your accounts, settings, cookies and saved passwords to one file, encrypted with a password you choose. <b>Restore</b> it on this PC or another one.</p>,
   },
   {
     view: "accounts", target: ["vault"], icon: <ShieldCheck />,
