@@ -4,7 +4,7 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
-## Unreleased
+## 0.6.4 (2026-11-23)
 
 ### New
 - **Always on top** (Settings → Appearance): keeps RAM's window above every other window, Roblox clients included.
