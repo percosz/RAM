@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { Activity, Archive, Gauge, ListChecks, Palette, PanelRight, PartyPopper, Play, RotateCcw, ShieldCheck, Sparkles, Stethoscope, UserPlus } from "lucide-react";
 import { Btn } from "../components";
 
-export type TourView = "accounts" | "clients" | "diagnostics" | "settings";
+export type TourView = "accounts" | "diagnostics" | "settings";
 
 interface Step {
   /** Screen to show for this step. */
@@ -73,14 +73,14 @@ const STEPS: Step[] = [
     </>,
   },
   {
-    view: "clients", target: ["nav-clients"], icon: <Activity />,
-    title: "Running clients",
-    body: <p>Every Roblox client that is open, with its account and memory use. Close one, or use <b>Minimize all</b> and <b>Restore all</b>.</p>,
+    view: "accounts", target: ["clients-bar"], icon: <Activity />,
+    title: "Every client at once",
+    body: <p><b>Minimize all</b> and <b>Restore all</b> act on every open Roblox client in one click, without taking focus from the window you are in.</p>,
   },
   {
     view: "diagnostics", target: ["nav-diagnostics"], icon: <Stethoscope />,
     title: "When a client drops",
-    body: <p><b>Crash history</b> records why a client ended: disconnected by Roblox, crashed, or replaced by another sign-in, with the reason and how long it ran. The <b>debug log</b> is here too.</p>,
+    body: <p><b>Crash history</b> records why a client ended: disconnected by Roblox, crashed, or replaced by another sign-in, with the reason and how long it ran. The <b>debug log</b> is here too. A Windows notification tells you when it happens.</p>,
   },
   {
     view: "settings", target: ["rejoin"], scroll: true, icon: <RotateCcw />,

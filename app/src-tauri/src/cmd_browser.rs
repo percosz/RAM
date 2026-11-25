@@ -95,7 +95,7 @@ pub struct BrowserChoice {
 }
 
 /// Browsers the user can pick in Settings.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_browsers() -> Vec<BrowserChoice> {
     let default = sysbrowser::default_browser().map(|b| b.exe.to_string_lossy().to_ascii_lowercase());
     installed_browsers()
@@ -127,7 +127,7 @@ pub fn sweep_profiles(data_dir: &std::path::Path) {
 /// stored cookie; without one it shows the sign-in page in that account's
 /// own profile, ready for `browser_capture`. Returns a short note for the
 /// UI when there is something to say.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_browser(app: AppHandle, state: State<'_, Shared>, id: AccountId) -> Result<String, String> {
     let (cookie, dir, name, choice) = {
         let mut s = state.lock().map_err(|_| "application state is unavailable".to_string())?;
@@ -183,7 +183,7 @@ pub fn open_browser(app: AppHandle, state: State<'_, Shared>, id: AccountId) -> 
 
 /// Reads the `.ROBLOSECURITY` cookie from the account's open browser
 /// window and stores it in the vault, then starts a login check.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_capture(app: AppHandle, state: State<'_, Shared>, id: AccountId) -> Result<(), String> {
     let dir = {
         let s = state.lock().map_err(|_| "application state is unavailable".to_string())?;
@@ -203,7 +203,7 @@ pub fn browser_capture(app: AppHandle, state: State<'_, Shared>, id: AccountId) 
 }
 
 /// Closes the account's browser window and clears the profile's cookies.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_clear(state: State<'_, Shared>, id: AccountId) -> Result<(), String> {
     let dir = {
         let s = state.lock().map_err(|_| "application state is unavailable".to_string())?;

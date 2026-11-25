@@ -180,14 +180,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const unsubs: Array<() => void> = [];
     // A batch check fires one event per account; take one snapshot for the burst.
     let pending: number | null = null;
-    api.onAccountUpdated(() => {
+    const later = () => {
       if (pending != null) return;
       pending = window.setTimeout(() => { pending = null; void refresh(); }, 120);
-    }).then((u) => unsubs.push(u));
-    api.onPresence(() => {
-      if (pending != null) return;
-      pending = window.setTimeout(() => { pending = null; void refresh(); }, 120);
-    }).then((u) => unsubs.push(u));
+    };
+    // These two events only ever mean "take a new snapshot". While the
+    // window is minimized the page does not listen for them at all, so it
+    // is not woken to fetch something nobody can see; one snapshot is taken
+    // when the window is shown again.
+    let quiet: Array<() => void> = [];
+    let listening = false;
+    const listenQuiet = () => {
+      listening = true;
+      for (const sub of [api.onAccountUpdated(later), api.onPresence(later)]) {
+        void sub.then((u) => { if (listening) quiet.push(u); else u(); });
+      }
+    };
+    const dropQuiet = () => { listening = false; quiet.forEach((u) => u()); quiet = []; };
+    const onVisibility = () => { dropQuiet(); if (!document.hidden) { listenQuiet(); void refresh(); } };
+    if (!document.hidden) listenQuiet();
+    document.addEventListener("visibilitychange", onVisibility);
+    unsubs.push(() => { document.removeEventListener("visibilitychange", onVisibility); dropQuiet(); });
     // A launch line is cleared when the client is seen (Running) or gone
     // (Exited), and "Client starting…" never outlives two minutes.
     const expiry = new Map<number, number>();
@@ -204,11 +217,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const onScheme = () => { void refresh(); };
     mq.addEventListener("change", onScheme);
-    // Auto-lock tick for master-password vaults.
-    const tick = window.setInterval(async () => {
-      try { if (await api.vaultTick()) { toast("Vault locked after inactivity.", "warn"); void refresh(); } } catch { /* ignore */ }
-    }, 20_000);
-    return () => { unsubs.forEach((u) => u()); mq.removeEventListener("change", onScheme); window.clearInterval(tick); };
+    // A master-password vault locks itself after inactivity (timed by the backend).
+    api.onVaultLocked(() => { toast("Vault locked after inactivity.", "warn"); void refresh(); }).then((u) => unsubs.push(u));
+    return () => { unsubs.forEach((u) => u()); mq.removeEventListener("change", onScheme); };
   }, [refresh, toast]);
 
   // An update check right after start, then every 6 hours, when enabled.

@@ -1,14 +1,12 @@
 //! Import from and export to the legacy `AccountData.json`, and a snapshot of
 //! running Roblox clients.
 
-use crate::dto::ClientView;
 use crate::state::{now, Shared};
 use crate::svc::LegacyDpapi;
 use ram_core::export::{self, ExportEncryption, ExportOptions};
 use ram_core::import::{self, PlanAction, PlanKind};
 use ram_core::import_cookies;
 use ram_core::model::AccountId;
-use ram_core::platform::ProcessApi;
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, State};
@@ -225,7 +223,7 @@ pub fn import_apply(app: AppHandle, state: State<'_, Shared>, folder: String, se
 
 /// Writes `AccountData.json` into the folder, optionally with cookies
 /// (always DPAPI-encrypted in that case).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_accounts(state: State<'_, Shared>, folder: String, with_cookies: bool) -> Result<String, String> {
     let mut s = lock(&state)?;
     let ids: Vec<AccountId> = s.store.accounts.iter().map(|a| a.id).collect();
@@ -254,39 +252,3 @@ pub fn export_accounts(state: State<'_, Shared>, folder: String, with_cookies: b
     Ok(format!("Exported {} account(s), {} with a cookie, to {}.", summary.accounts, summary.with_cookie, path.display()))
 }
 
-/// Running Roblox clients, matched to accounts where RAM observed the launch.
-#[tauri::command]
-pub fn clients_snapshot(state: State<'_, Shared>) -> Result<Vec<ClientView>, String> {
-    let mut s = lock(&state)?;
-    let snapshot = s.procs.list_clients().map_err(|e| e.to_string())?;
-    let timeout = s.store.settings.launch_timeout_secs;
-    let _ = s.clients.observe(now(), &snapshot, timeout);
-    let mut out = Vec::new();
-    for p in snapshot {
-        let account = s.clients.link_for_process(p.key).map(|l| l.account);
-        let sample = s.procs.sample(p.key).ok();
-        out.push(ClientView {
-            pid: p.key.pid,
-            account,
-            account_name: account.map(|a| s.account_name(a)),
-            working_set_mb: sample.map(|x| x.working_set / (1024 * 1024)).unwrap_or(0),
-            private_mb: sample.map(|x| x.private_bytes / (1024 * 1024)).unwrap_or(0),
-        });
-    }
-    Ok(out)
-}
-
-#[tauri::command]
-pub fn close_client(state: State<'_, Shared>, pid: u32) -> Result<(), String> {
-    let mut s = lock(&state)?;
-    let key = s.procs.list_clients().map_err(|e| e.to_string())?.into_iter().find(|p| p.key.pid == pid).map(|p| p.key);
-    match key {
-        Some(k) => {
-            // Recorded as "Closed", not a crash, by the watcher.
-            s.diag.closing.push(pid);
-            s.log.info(&format!("asked client {pid} to close"));
-            s.procs.request_close(k).map_err(|e| e.to_string())
-        }
-        None => Err("that client is no longer running".into()),
-    }
-}

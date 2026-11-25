@@ -80,6 +80,7 @@ export interface Settings {
   backdrop: string;
   /** Keep RAM's window above every other window. */
   always_on_top: boolean;
+  notify_ended: boolean;
   /** Percent of the theme's colour over the desktop when a backdrop is on. */
   backdrop_tint: number;
   /** "" follows the Windows default browser; otherwise a browser's full path. */
@@ -182,8 +183,6 @@ export interface AccountPatch {
 
 export interface LaunchEvent { account: number; state: string; message: string; }
 
-export interface ClientView { pid: number; account: number | null; account_name: string | null; working_set_mb: number; private_mb: number; }
-
 export type EndKind = "Closed" | "Disconnected" | "Crashed" | "Teleported" | "Replaced" | "SignedOut";
 export interface CrashRecord {
   id: number;
@@ -216,6 +215,7 @@ export const api = {
   setLimits: (limits: LimitSettings) => invoke<LimitSettings>("set_limits", { limits }),
   applyBandwidth: (kbps: number) => invoke<LimitSettings>("apply_bandwidth", { kbps }),
   clientsMinimizeAll: (minimize: boolean) => invoke<number>("clients_minimize_all", { minimize }),
+  notifyTest: () => invoke<void>("notify_test"),
   importFind: () => invoke<FoundFile[]>("import_find"),
   signinStart: () => invoke<string>("signin_start"),
   signinPoll: () => invoke<SignInPoll>("signin_poll"),
@@ -247,7 +247,7 @@ export const api = {
   vaultChangePassword: (current: string, password: string) => invoke<string>("vault_change_password", { current, password }),
   vaultRemove: () => invoke<VaultStatus>("vault_remove"),
   vaultOptions: (autoLockSecs: number, requireHello: boolean) => invoke<VaultStatus>("vault_options", { autoLockSecs, requireHello }),
-  vaultTick: () => invoke<boolean>("vault_tick"),
+  onVaultLocked: (cb: () => void): Promise<UnlistenFn> => listen("vault-locked", () => cb()),
   /** Stores a pasted cookie after Roblox confirms it belongs to this account; returns the username. */
   cookieSet: (id: number, cookie: string) => invoke<string>("cookie_set", { id, cookie }),
   cookieRemove: (id: number) => invoke<void>("cookie_remove", { id }),
@@ -267,9 +267,6 @@ export const api = {
   importScan: (folder: string, password?: string) => invoke<PlanView>("import_scan", { folder, password: password ?? null }),
   importApply: (folder: string, selected: number[], withCookies: boolean, password?: string) => invoke<string>("import_apply", { folder, selected, withCookies, password: password ?? null }),
   exportAccounts: (folder: string, withCookies: boolean) => invoke<string>("export_accounts", { folder, withCookies }),
-  clientsSnapshot: () => invoke<ClientView[]>("clients_snapshot"),
-  closeClient: (pid: number) => invoke<void>("close_client", { pid }),
-
   crashes: () => invoke<CrashRecord[]>("crashes_list"),
   crashesClear: () => invoke<void>("crashes_clear"),
   crashOpenLog: (id: number) => invoke<void>("crash_open_log", { id }),

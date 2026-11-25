@@ -57,7 +57,8 @@ auto-updater verifies every update against RAM's own release signature.
 - **Launch.** Type a **Place ID** (Rogue Lineage is pre-filled; the bar shows
   the place's name) and optional **Job ID**, tick accounts, press **Join
   Server**. Or type a **username** and **Follow** them into their game.
-  Several accounts launch one by one, spaced by a delay you set. Launching
+  Several accounts launch back to back, spaced only by a delay you set:
+  nothing waits for the client before it to finish loading. Launching
   uses a one-time Roblox authentication ticket from the stored cookie, through
   whatever handles `roblox-player:` links on your PC (Roblox itself, or
   Bloxstrap, Froststrap, Fishstrap, Voidstrap).
@@ -84,10 +85,10 @@ auto-updater verifies every update against RAM's own release signature.
 - **Performance for alts.** An FPS cap, lowest graphics and lighter rendering
   (MSAA, texture quality, rendering mode, gray sky, no grass, lowest render
   quality, paused lighting) plus your own FastFlags, written just before each
-  alt client starts and put back once it has read them. Per-account FPS cap
+  batch of alt clients starts and put back once the last one has read them. Per-account FPS cap
   and *Full quality*; the **Main** account is never touched. Presets: Roblox
   defaults (the starting point, nothing is written), Balanced (30 FPS), Max
-  alts (5 FPS, lowest) and **23S**, which adds the running-client limits for
+  alts (5 FPS, lowest) and **23S**, which adds volume 0 and the running-client limits for
   a lot of alts at once. Volume 0 is an option.
 - **Running clients.** Minimize on launch, tiny windows, mute, a background
   CPU limit, efficiency mode and memory trim for alt clients, all off until
@@ -100,8 +101,15 @@ auto-updater verifies every update against RAM's own release signature.
   spaced and capped attempts. Never a client you closed yourself, never Main.
 - **Saved places.** A bookmark button next to the Place ID keeps your places
   one click away.
-- **Clients.** Every Roblox client that is open, with its account and memory
-  use; close one, or Minimize all / Restore all with one click.
+- **Notifications.** A Windows notification when a client is disconnected,
+  crashes, is replaced by another sign-in or has its sign-in refused; never
+  for a client you closed yourself. Several at once make one notification.
+- **Minimize all / Restore all.** In the status bar: every open Roblox
+  client in one click, without taking focus from the window you are in.
+- **Stays responsive.** RAM runs above normal priority, keeps its own memory
+  from being paged out and never does work on its window's thread, so the
+  window still answers with dozens of clients open. Minimized, it stops
+  drawing and gives memory back.
 - **Diagnostics.** A crash history that says how each client ended
   (disconnected, crashed, replaced, sign-in refused) with the reason from its
   log, CSV export and a link to the log. A client you close yourself is not

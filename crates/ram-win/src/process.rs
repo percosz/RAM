@@ -25,7 +25,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{IsWindowVisible, PostMessageW, WM_CLOSE};
 
-use windows::Win32::System::Threading::GetExitCodeProcess;
+use windows::Win32::System::Threading::{GetCurrentProcess, GetExitCodeProcess};
 
 use crate::gpu::GpuSampler;
 use crate::util::{
@@ -40,6 +40,71 @@ pub const DESKTOP_IMAGE: &str = "RobloxPlayerBeta.exe";
 pub const STORE_IMAGE: &str = "Windows10Universal.exe";
 /// Package-family fragment that identifies the Store client's install path.
 pub const STORE_PATH_MARKER: &str = "ROBLOXCORPORATION";
+
+/// Raises this process, and the WebView2 processes it started, to "Above
+/// normal" priority. With dozens of game clients using every core, a
+/// normal-priority window waits its turn behind all of them; this keeps the
+/// manager's own window answering. Returns how many processes were raised.
+/// Only this program's own process tree is touched.
+pub fn boost_own_processes() -> usize {
+    let me = unsafe { GetCurrentProcessId() };
+    let mut raised = 0;
+    if unsafe { SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS) }.is_ok() {
+        raised += 1;
+    }
+    // (pid, parent pid, image name) of every process.
+    let mut all: Vec<(u32, u32, String)> = Vec::new();
+    if let Ok(snapshot) = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) } {
+        let snapshot = Handle(snapshot);
+        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut more = unsafe { Process32FirstW(snapshot.raw(), &mut entry) }.is_ok();
+        while more {
+            all.push((entry.th32ProcessID, entry.th32ParentProcessID, from_wide(&entry.szExeFile)));
+            more = unsafe { Process32NextW(snapshot.raw(), &mut entry) }.is_ok();
+        }
+    }
+    for pid in descendants_of(me, &all, "msedgewebview2.exe") {
+        if let Ok(h) = open_process(pid, PROCESS_SET_INFORMATION) {
+            if unsafe { SetPriorityClass(h.raw(), ABOVE_NORMAL_PRIORITY_CLASS) }.is_ok() {
+                raised += 1;
+            }
+        }
+    }
+    raised
+}
+
+/// Tells Windows not to page RAM's own memory out. When dozens of game
+/// clients fill the PC's memory, Windows takes pages from every process that
+/// is not in front; the manager then has to read its own code back from the
+/// page file before it can answer a click, and its window shows "Not
+/// responding" meanwhile. A hard minimum of 24 MB (about what RAM.exe uses)
+/// keeps it in memory. Only this process is touched.
+pub fn keep_resident() -> bool {
+    use windows::Win32::System::Memory::{SetProcessWorkingSetSizeEx, QUOTA_LIMITS_HARDWS_MAX_DISABLE, QUOTA_LIMITS_HARDWS_MIN_ENABLE};
+    const MIN: usize = 24 * 1024 * 1024;
+    const MAX: usize = 1024 * 1024 * 1024;
+    unsafe { SetProcessWorkingSetSizeEx(GetCurrentProcess(), MIN, MAX, QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE) }.is_ok()
+}
+
+/// Pids below `root` in the process tree whose image is `image` (matched
+/// without case). `all` is (pid, parent pid, image name).
+fn descendants_of(root: u32, all: &[(u32, u32, String)], image: &str) -> Vec<u32> {
+    let mut found = Vec::new();
+    let mut frontier = vec![root];
+    let mut seen = vec![root];
+    while let Some(parent) = frontier.pop() {
+        for (pid, ppid, name) in all {
+            if *ppid == parent && *pid != 0 && !seen.contains(pid) {
+                seen.push(*pid);
+                frontier.push(*pid);
+                if name.eq_ignore_ascii_case(image) {
+                    found.push(*pid);
+                }
+            }
+        }
+    }
+    found
+}
 
 /// `GetExitCodeProcess` value of a process that is still running.
 const STILL_ACTIVE: u32 = 259;
@@ -394,6 +459,22 @@ mod tests {
         ));
         assert!(procs.classify("RobloxStudioBeta.exe").is_none());
         assert!(procs.classify("notepad.exe").is_none());
+    }
+
+    #[test]
+    fn descendants_are_found_at_any_depth_and_only_by_image() {
+        let all = vec![
+            (10, 1, "RAM.exe".to_string()),
+            (20, 10, "msedgewebview2.exe".to_string()),
+            (21, 20, "MSEDGEWEBVIEW2.EXE".to_string()),
+            (22, 20, "crashpad_handler.exe".to_string()),
+            (30, 1, "msedgewebview2.exe".to_string()), // someone else's
+            (0, 10, "msedgewebview2.exe".to_string()),
+        ];
+        let mut got = descendants_of(10, &all, "msedgewebview2.exe");
+        got.sort();
+        assert_eq!(got, vec![20, 21]);
+        assert!(descendants_of(99, &all, "msedgewebview2.exe").is_empty());
     }
 
     #[test]

@@ -183,13 +183,13 @@ pub fn notes_since(changelog: &str, seen: &str, current: &str) -> String {
 
 /// What "What's new" shows: everything since the version whose notes the
 /// user last saw.
-#[tauri::command]
-pub fn release_notes(state: State<'_, Shared>) -> String {
+#[tauri::command(async)]
+pub fn release_notes(state: State<'_, Shared>) -> Result<String, String> {
     let seen = state.lock().map(|s| s.store.settings.seen_version.clone()).unwrap_or_default();
-    notes_since(CHANGELOG, &seen, env!("CARGO_PKG_VERSION"))
+    Ok(notes_since(CHANGELOG, &seen, env!("CARGO_PKG_VERSION")))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mark_seen_version(state: State<'_, Shared>) -> Result<(), String> {
     let mut s = state.lock().map_err(|_| "application state is unavailable".to_string())?;
     s.store.settings.seen_version = env!("CARGO_PKG_VERSION").to_string();
@@ -199,7 +199,7 @@ pub fn mark_seen_version(state: State<'_, Shared>) -> Result<(), String> {
 
 /// Opens an https URL in the default browser. Only GitHub and Roblox
 /// addresses pass, so a page cannot talk RAM into opening anything else.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_url(app: AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let ok = url.starts_with("https://github.com/") || url.starts_with("https://www.roblox.com/");

@@ -13,13 +13,13 @@ fn lock<'a>(state: &'a State<'_, Shared>) -> Result<std::sync::MutexGuard<'a, cr
     state.lock().map_err(|_| "application state is unavailable".to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_status(state: State<'_, Shared>) -> Result<VaultStatus, String> {
     let s = lock(&state)?;
     Ok(dto::vault_status(&s))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_setup_dpapi(state: State<'_, Shared>) -> Result<VaultStatus, String> {
     let mut s = lock(&state)?;
     s.vault.setup_dpapi(&crate::svc::WinEntropy, &crate::svc::WinProtector, 0).map_err(|e| e.to_string())?;
@@ -27,7 +27,7 @@ pub fn vault_setup_dpapi(state: State<'_, Shared>) -> Result<VaultStatus, String
 }
 
 /// Sets up a master-password vault and returns the one-time recovery code.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_setup_password(state: State<'_, Shared>, password: String) -> Result<String, String> {
     if password.len() < 8 {
         return Err("Use at least 8 characters.".into());
@@ -37,7 +37,7 @@ pub fn vault_setup_password(state: State<'_, Shared>, password: String) -> Resul
     Ok(code.display().to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_unlock(state: State<'_, Shared>, password: String) -> Result<VaultStatus, String> {
     let mut s = lock(&state)?;
     match s.vault.mode() {
@@ -48,21 +48,21 @@ pub fn vault_unlock(state: State<'_, Shared>, password: String) -> Result<VaultS
     Ok(dto::vault_status(&s))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_unlock_recovery(state: State<'_, Shared>, code: String) -> Result<VaultStatus, String> {
     let mut s = lock(&state)?;
     s.vault.unlock_recovery(&code, now()).map_err(|e| e.to_string())?;
     Ok(dto::vault_status(&s))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_lock(state: State<'_, Shared>) -> Result<VaultStatus, String> {
     let mut s = lock(&state)?;
     s.vault.lock();
     Ok(dto::vault_status(&s))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_change_password(state: State<'_, Shared>, current: String, password: String) -> Result<String, String> {
     if password.len() < 8 {
         return Err("Use at least 8 characters.".into());
@@ -77,26 +77,19 @@ pub fn vault_change_password(state: State<'_, Shared>, current: String, password
     Ok(code.display().to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_remove(state: State<'_, Shared>) -> Result<VaultStatus, String> {
     let mut s = lock(&state)?;
     s.vault.destroy().map_err(|e| e.to_string())?;
     Ok(dto::vault_status(&s))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_options(state: State<'_, Shared>, auto_lock_secs: u32, require_hello: bool) -> Result<VaultStatus, String> {
     let mut s = lock(&state)?;
     s.vault.set_auto_lock_secs(auto_lock_secs.min(24 * 3600)).map_err(|e| e.to_string())?;
     s.vault.set_require_hello_reveal(require_hello).map_err(|e| e.to_string())?;
     Ok(dto::vault_status(&s))
-}
-
-/// Ticks the auto-lock timer; returns true when the vault locked just now.
-#[tauri::command]
-pub fn vault_tick(state: State<'_, Shared>) -> Result<bool, String> {
-    let mut s = lock(&state)?;
-    Ok(s.vault.tick(now()))
 }
 
 /// Stores a cookie for an account, then starts a login check.
@@ -139,7 +132,7 @@ pub fn cookie_set(app: AppHandle, state: State<'_, Shared>, id: AccountId, cooki
     Ok(who.user.name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cookie_remove(state: State<'_, Shared>, id: AccountId) -> Result<(), String> {
     let mut s = lock(&state)?;
     s.vault.remove_secret(id).map_err(|e| e.to_string())

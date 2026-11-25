@@ -102,3 +102,27 @@ impl Drop for TrayNotifier {
         }
     }
 }
+
+/// Registers `app_id` as a notification sender for the current user
+/// (`HKCU\Software\Classes\AppUserModelId\<app_id>`) with the name and
+/// icon Windows shows on its notifications. Windows silently drops
+/// notifications from a program it cannot identify, which is every copy
+/// that has no Start menu shortcut carrying the id (the portable build).
+/// Returns whether the name was written.
+pub fn register_app_id(app_id: &str, display_name: &str, icon: Option<&std::path::Path>) -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+    let wide = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
+    let key = wide(&format!("Software\\Classes\\AppUserModelId\\{app_id}"));
+    let set = |name: &str, value: &str| -> bool {
+        let (name, value) = (wide(name), wide(value));
+        let status = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, PCWSTR(key.as_ptr()), PCWSTR(name.as_ptr()), REG_SZ.0, Some(value.as_ptr() as *const _), (value.len() * 2) as u32) };
+        status == ERROR_SUCCESS
+    };
+    let named = set("DisplayName", display_name);
+    if let Some(icon) = icon {
+        set("IconUri", &icon.display().to_string());
+    }
+    named
+}

@@ -125,7 +125,7 @@ pub fn start_check(app: AppHandle, id: AccountId) {
     });
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_accounts(app: AppHandle, ids: Vec<AccountId>) -> Result<(), String> {
     for id in ids {
         start_check(app.clone(), id);
@@ -139,7 +139,7 @@ const AVATAR_TTL_SECS: i64 = 24 * 3600;
 /// Fetches headshots for every account with a known user id whose image is
 /// missing or older than a day (`force` refreshes all). Public API, no
 /// cookie; runs on a worker thread and announces each updated account.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn refresh_avatars(app: AppHandle, force: bool) -> Result<(), String> {
     let wanted: Vec<(AccountId, u64)> = {
         let st = app.state::<Shared>();
@@ -251,7 +251,7 @@ pub async fn place_info(app: AppHandle, place_id: u64) -> Result<Option<ram_core
 /// Queues launches for several accounts to a place (optionally a specific
 /// server), spaced by the configured delay. Accounts without a stored cookie
 /// are reported and skipped.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn launch(app: AppHandle, state: State<'_, Shared>, ids: Vec<AccountId>, place_id: u64, job_id: Option<String>) -> Result<(), String> {
     if place_id == 0 {
         return Err("Enter a place ID.".into());
@@ -280,7 +280,7 @@ pub fn launch(app: AppHandle, state: State<'_, Shared>, ids: Vec<AccountId>, pla
 
 /// Follows a user by username: resolves the id, then launches into their
 /// server for each selected account.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn follow(app: AppHandle, state: State<'_, Shared>, ids: Vec<AccountId>, username: String) -> Result<(), String> {
     let username = username.trim().to_string();
     if username.is_empty() {
@@ -307,22 +307,51 @@ pub fn follow(app: AppHandle, state: State<'_, Shared>, ids: Vec<AccountId>, use
     Ok(())
 }
 
-/// One launch at a time: the graphics files are shared by every client, so
-/// a launch holds this until its client has read them and they are back
-/// to the user's own values.
+/// Serializes the short part of a launch that writes Roblox's files and
+/// starts the client. It is no longer held while a client loads: launches
+/// that need the same settings go back to back.
 static LAUNCH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// How long to wait for the client to read its settings before restoring
-/// them anyway.
-const READ_WAIT_SECS: u64 = 60;
+/// How long after the last launch the alt settings stay in place when a
+/// client never shows that it has read them (a very busy PC).
+const READ_WAIT_SECS: u64 = 120;
 
-/// Writes the FPS cap / quality (XML) and rendering flags (JSON) for one
-/// account's launch. Returns the undo handles, or `None` when nothing is to
-/// be written (settings off, Main account, no location known).
-fn apply_graphics(app: &AppHandle, id: AccountId) -> Option<(Option<client_settings::XmlUndo>, Option<client_settings::FlagUndo>, Vec<String>)> {
+/// The alt graphics settings currently written to Roblox's files.
+///
+/// Roblox's settings file and the FastFlag file are shared by every client,
+/// and a client reads them once while it starts. They used to be written,
+/// waited on and put back for every single launch, so each account waited
+/// for the one before it to finish loading. Now they are written once for a
+/// run of launches that want the same settings, and put back when the last
+/// of those clients has read them. Only a launch that needs *different*
+/// settings (another FPS cap, Full quality, or Main) waits for the earlier
+/// clients first.
+struct Session {
+    eff: client_settings::Effective,
+    xml_undo: Option<client_settings::XmlUndo>,
+    flag_undo: Option<client_settings::FlagUndo>,
+    /// Tracker ids of the clients started under these settings.
+    pending: Vec<String>,
+    last_launch: std::time::Instant,
+}
+
+static SESSION: std::sync::Mutex<Option<Session>> = std::sync::Mutex::new(None);
+/// Whether the thread that puts the settings back is running.
+static SETTLER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The settings a launch of `id` needs written, or `None` for the user's
+/// own (performance off, or Main).
+fn effective_for(app: &AppHandle, id: AccountId) -> Option<client_settings::Effective> {
     let st = app.state::<Shared>();
-    let mut s = st.lock().ok()?;
-    let eff = client_settings::effective(&s.store.graphics, &s.store.account_graphics(id), s.store.is_main(id))?;
+    let s = st.lock().ok()?;
+    client_settings::effective(&s.store.graphics, &s.store.account_graphics(id), s.store.is_main(id))
+}
+
+/// Writes the FPS cap / quality (XML) and rendering flags (JSON). Returns
+/// the undo handles and anything that could not be applied.
+fn apply_effective(app: &AppHandle, id: AccountId, eff: &client_settings::Effective) -> (Option<client_settings::XmlUndo>, Option<client_settings::FlagUndo>, Vec<String>) {
+    let st = app.state::<Shared>();
+    let Ok(mut s) = st.lock() else { return (None, None, Vec::new()) };
     let mut notes = Vec::new();
     let mut xml_undo = None;
     if eff.fps_cap > 0 || eff.low_graphics || eff.mute {
@@ -330,7 +359,7 @@ fn apply_graphics(app: &AppHandle, id: AccountId) -> Option<(Option<client_setti
         if let Some(path) = path {
             let file = client_settings::XmlFile::new(path);
             let (_, current) = file.read();
-            let want = client_settings::xml_for_launch(&eff, &current);
+            let want = client_settings::xml_for_launch(eff, &current);
             match file.apply(&want) {
                 Ok(u) => {
                     s.store.xml_undo = Some(u.clone());
@@ -342,7 +371,7 @@ fn apply_graphics(app: &AppHandle, id: AccountId) -> Option<(Option<client_setti
         }
     }
     let mut flag_undo = None;
-    let set = client_settings::flag_set(&eff);
+    let set = client_settings::flag_set(eff);
     if !set.is_empty() {
         let launcher = ram_win::launcher_info::detect();
         match launcher.flag_file {
@@ -361,44 +390,145 @@ fn apply_graphics(app: &AppHandle, id: AccountId) -> Option<(Option<client_setti
         set.len(),
         if notes.is_empty() { String::new() } else { format!("; {}", notes.join("; ")) }
     ));
-    Some((xml_undo, flag_undo, notes))
+    (xml_undo, flag_undo, notes)
 }
 
-/// Waits until the watcher reports that the client with this tracker id
-/// has read its settings (or it exits, or the wait times out).
-fn wait_for_read(app: &AppHandle, btid: &str) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(READ_WAIT_SECS);
-    while std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(250));
-        let st = app.state::<Shared>();
-        let Ok(s) = st.lock() else { return };
-        if s.diag.reads.get(btid).copied().unwrap_or(false) {
-            drop(s);
-            // Roblox reads the files a moment after the first mark.
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            return;
-        }
-    }
-    if let Ok(s) = app.state::<Shared>().lock() {
-        s.log.warn(&format!("launch: no settings-read mark within {READ_WAIT_SECS} s; restoring anyway"));
-    }
+/// Whether every client started under the session has read its settings
+/// (the watcher marks a tracker id once its log shows it, or the client is
+/// gone). A session nothing was started under counts as read.
+fn session_read(app: &AppHandle, session: &Session) -> bool {
+    let st = app.state::<Shared>();
+    let Ok(s) = st.lock() else { return true };
+    session.pending.iter().all(|b| s.diag.reads.get(b).copied().unwrap_or(false))
 }
 
-fn restore_graphics(app: &AppHandle, xml_undo: Option<client_settings::XmlUndo>, flag_undo: Option<client_settings::FlagUndo>) {
+/// Puts the user's own values back.
+fn restore_session(app: &AppHandle, session: Session) {
     let st = app.state::<Shared>();
     let Ok(mut s) = st.lock() else { return };
-    if let Some(u) = flag_undo {
+    if let Some(u) = session.flag_undo {
         if let Err(e) = u.put_back() {
             s.log.warn(&format!("flag restore: {e}"));
         }
     }
-    if let Some(u) = xml_undo {
+    if let Some(u) = session.xml_undo {
         if let Err(e) = u.put_back() {
             s.log.warn(&format!("settings restore: {e}"));
         }
         s.store.xml_undo = None;
         s.save();
     }
+    s.log.info(&format!("launch: your own Roblox settings are back in place ({} client{} started with the alt settings)", session.pending.len(), if session.pending.len() == 1 { "" } else { "s" }));
+}
+
+/// Makes Roblox's files right for a launch of `id`. Returns whether the
+/// launch runs under the shared session, and notes for the row.
+///
+/// Same settings as the session in place: nothing to do, the launch goes
+/// straight ahead. Different ones: the clients started so far must read
+/// theirs first, then the files are put back and rewritten.
+fn prepare_graphics(app: &AppHandle, id: AccountId) -> (bool, Vec<String>) {
+    let need = effective_for(app, id);
+    let mut slot = SESSION.lock().unwrap_or_else(|p| p.into_inner());
+    if let (Some(s), Some(n)) = (slot.as_ref(), need.as_ref()) {
+        if s.eff == *n {
+            return (true, Vec::new());
+        }
+    }
+    if let Some(old) = slot.take() {
+        if !session_read(app, &old) {
+            emit_launch(app, id, "Launching", "Waiting for the clients before it to load: this account uses different settings…");
+        }
+        let deadline = old.last_launch + std::time::Duration::from_secs(READ_WAIT_SECS);
+        loop {
+            if session_read(app, &old) {
+                // Roblox reads the files a moment after the first mark.
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                if let Ok(s) = app.state::<Shared>().lock() {
+                    s.log.warn(&format!("launch: no settings-read mark within {READ_WAIT_SECS} s; restoring anyway"));
+                }
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        restore_session(app, old);
+    }
+    match need {
+        Some(eff) => {
+            let (xml_undo, flag_undo, notes) = apply_effective(app, id, &eff);
+            *slot = Some(Session { eff, xml_undo, flag_undo, pending: Vec::new(), last_launch: std::time::Instant::now() });
+            (true, notes)
+        }
+        None => (false, Vec::new()),
+    }
+}
+
+/// Starts (once) the thread that puts the user's settings back when the
+/// last client of the session has read them.
+fn ensure_settler(app: AppHandle) {
+    use std::sync::atomic::Ordering;
+    if SETTLER.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || loop {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            // Never between a launch writing the files and starting its client.
+            let Ok(_serial) = LAUNCH_LOCK.try_lock() else { continue };
+            let mut slot = SESSION.lock().unwrap_or_else(|p| p.into_inner());
+            let Some(s) = slot.as_ref() else { break };
+            let idle = s.last_launch.elapsed();
+            let read = session_read(&app, s) && idle >= std::time::Duration::from_secs(2);
+            if read || idle >= std::time::Duration::from_secs(READ_WAIT_SECS) {
+                if !read {
+                    if let Ok(st) = app.state::<Shared>().lock() {
+                        st.log.warn(&format!("launch: no settings-read mark within {READ_WAIT_SECS} s; restoring anyway"));
+                    }
+                }
+                if let Some(s) = slot.take() {
+                    restore_session(&app, s);
+                }
+                break;
+            }
+        }
+        SETTLER.store(false, Ordering::SeqCst);
+        // A launch may have opened a new session while this one was closing.
+        let open = SESSION.lock().map(|s| s.is_some()).unwrap_or(false);
+        if !open || SETTLER.swap(true, Ordering::SeqCst) {
+            break;
+        }
+    });
+}
+
+/// Orders a batch so accounts that want the same settings launch together:
+/// first those matching the settings already in place, then those that need
+/// the user's own (Main), then the rest grouped by what they need. Within a
+/// group the user's order is kept.
+fn batch_order(app: &AppHandle, ids: Vec<AccountId>) -> Vec<AccountId> {
+    let needs: Vec<(AccountId, Option<client_settings::Effective>)> = ids.iter().map(|id| (*id, effective_for(app, *id))).collect();
+    let active = SESSION.lock().ok().and_then(|s| s.as_ref().map(|s| s.eff.clone()));
+    order_by_settings(needs, active.as_ref())
+}
+
+/// The pure part of [`batch_order`].
+fn order_by_settings<E: PartialEq + Clone>(needs: Vec<(AccountId, Option<E>)>, active: Option<&E>) -> Vec<AccountId> {
+    let mut groups: Vec<(Option<E>, Vec<AccountId>)> = Vec::new();
+    for (id, need) in needs {
+        match groups.iter_mut().find(|(g, _)| *g == need) {
+            Some((_, list)) => list.push(id),
+            None => groups.push((need, vec![id])),
+        }
+    }
+    // Stable: 0 = what is in place now, 1 = the user's own settings, 2 = the rest.
+    groups.sort_by_key(|(g, _)| match (g, active) {
+        (Some(g), Some(a)) if g == a => 0,
+        (None, _) => 1,
+        _ => 2,
+    });
+    groups.into_iter().flat_map(|(_, list)| list).collect()
 }
 
 /// Launches one account again for auto-rejoin. The way it joined is not
@@ -414,6 +544,7 @@ fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model
     std::thread::spawn(move || {
         let http = WinHttp::new();
         let mut first = true;
+        let ids = batch_order(&app, ids);
         for id in ids {
             if !first && spacing > 0 {
                 std::thread::sleep(std::time::Duration::from_secs(spacing as u64));
@@ -436,11 +567,9 @@ fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model
                 .unwrap_or(0);
             match roblox::prepare_launch(&http, &cookie, &target, None, now_ms) {
                 Ok((uri, btid)) => {
-                    let graphics = apply_graphics(&app, id);
-                    if let Some((_, _, notes)) = &graphics {
-                        for n in notes {
-                            emit_launch(&app, id, "Launching", n.clone());
-                        }
+                    let (in_session, notes) = prepare_graphics(&app, id);
+                    for n in notes {
+                        emit_launch(&app, id, "Launching", n);
                     }
                     {
                         let st = app.state::<Shared>();
@@ -482,17 +611,16 @@ fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model
                                 s.save();
                             }
                             emit_launch(&app, id, "Launching", "Client starting…");
-                            if let Some((xml_undo, flag_undo, _)) = graphics {
-                                if xml_undo.is_some() || flag_undo.is_some() {
-                                    wait_for_read(&app, &btid);
-                                    restore_graphics(&app, xml_undo, flag_undo);
+                            if in_session {
+                                // The settings stay in place for the next launch; the
+                                // settler puts the user's back once this client has read them.
+                                if let Some(s) = SESSION.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+                                    s.pending.push(btid.clone());
+                                    s.last_launch = std::time::Instant::now();
                                 }
                             }
                         }
                         Err(e) => {
-                            if let Some((xml_undo, flag_undo, _)) = graphics {
-                                restore_graphics(&app, xml_undo, flag_undo);
-                            }
                             if let Ok(s) = app.state::<Shared>().lock() {
                                 s.log.error(&format!("launch {id}: could not start the client: {e}"));
                             }
@@ -519,6 +647,27 @@ fn run_launches(app: AppHandle, ids: Vec<AccountId>, target: LaunchTarget, model
                     emit_launch(&app, id, "Failed", describe(&e));
                 }
             }
+            drop(_serial);
+            ensure_settler(app.clone());
         }
     });
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::order_by_settings;
+
+    #[test]
+    fn accounts_with_the_same_settings_launch_together() {
+        // 1 and 3 want "a", 2 is Main (the user's own), 4 wants "b".
+        let needs = vec![(1, Some("a")), (2, None), (3, Some("a")), (4, Some("b"))];
+        // Nothing in place: Main first (no waiting), then each group in the order it first appears.
+        assert_eq!(order_by_settings(needs.clone(), None), vec![2, 1, 3, 4]);
+        // "b" is already in place: its accounts go first, then Main, then the rest.
+        assert_eq!(order_by_settings(needs.clone(), Some(&"b")), vec![4, 2, 1, 3]);
+        assert_eq!(order_by_settings(needs, Some(&"a")), vec![1, 3, 2, 4]);
+        // One kind only: the user's order is untouched.
+        assert_eq!(order_by_settings(vec![(5, Some("a")), (3, Some("a")), (9, Some("a"))], None), vec![5, 3, 9]);
+        assert_eq!(order_by_settings::<&str>(vec![], None), Vec::<u64>::new());
+    }
 }

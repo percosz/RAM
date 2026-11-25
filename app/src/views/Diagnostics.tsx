@@ -99,7 +99,7 @@ function DebugLog({ toast }: { toast: (t: string, tone?: "good" | "bad" | "warn"
   const [on, setOn] = useState<Record<LogLine["level"], boolean>>({ error: true, warn: true, info: true, debug: false });
   const [filter, setFilter] = useState("");
   const load = async () => { try { setLines(await api.logTail(3000)); } catch (e) { toast(String(e), "bad"); } };
-  useEffect(() => { void load(); const t = window.setInterval(load, 4000); return () => window.clearInterval(t); /* eslint-disable-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { void load(); const t = window.setInterval(() => { if (!document.hidden) void load(); }, 4000); return () => window.clearInterval(t); /* eslint-disable-line react-hooks/exhaustive-deps */ }, []);
   const counts = useMemo(() => lines.reduce((m, l) => { m[l.level] = (m[l.level] ?? 0) + 1; return m; }, {} as Record<string, number>), [lines]);
   const f = filter.trim().toLowerCase();
   const shown = lines.filter((l) => on[l.level] && (!f || l.text.toLowerCase().includes(f)));
