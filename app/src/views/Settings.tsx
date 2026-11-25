@@ -74,8 +74,8 @@ const PRESETS: Record<"max" | "balanced" | "defaults", Partial<GraphicsSettings>
   defaults: { enabled: false, fps_cap: 0, low_graphics: false, lighter_rendering: false, mute_volume: false },
 };
 
-/** The 23S preset: Max alts graphics plus these limits for running clients,
- *  for a lot of alts at once. */
+/** The 23S preset: Max alts graphics with volume 0, plus these limits for
+ *  running clients, for a lot of alts at once. */
 const LIMITS_23S: Partial<LimitSettings> = { minimize_on_launch: true, tiny_on_launch: true, cpu_limit_percent: 5, efficiency_mode: true, trim_every_min: 5 };
 function is23s(l: LimitSettings): boolean {
   return (Object.keys(LIMITS_23S) as Array<keyof LimitSettings>).every((k) => l[k] === LIMITS_23S[k]);
@@ -212,6 +212,14 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
               <div className="hint">Waits 10 s before the first, then 30 s, 90 s and longer. A client that stays up for 10 minutes resets the count.</div>
             </div>
           )}
+          <Toggle checked={settings.notify_ended} onChange={(c) => saveSettings({ notify_ended: c })} label="Notify when a client drops"
+            hint="A Windows notification when a client is disconnected, crashes, is replaced by another sign-in or has its sign-in refused. Not when you close one yourself. Several at once are counted in one notification, and names follow Hide names." />
+          {settings.notify_ended && (
+            <div className="row" style={{ gap: 10, marginLeft: 46, alignItems: "flex-start" }}>
+              <Btn sm onClick={async () => { try { await api.notifyTest(); } catch (e) { toast(String(e), "bad"); } }}>Send a test notification</Btn>
+              <span className="hint">Nothing appeared? Windows holds notifications back while Do not disturb is on, which it turns on by itself during a full-screen game. They wait in the notification centre. To let RAM through: Windows Settings → System → Notifications → Set priority notifications → Add apps → RAM.</span>
+            </div>
+          )}
           <div className="kv">
             <span>Check who is in game every</span>
             <Seg sm value={String(settings.presence_every_secs)} options={[["10", "10 s"], ["15", "15 s"], ["30", "30 s"], ["45", "45 s"], ["60", "60 s"]]} onChange={(v) => saveSettings({ presence_every_secs: Number(v) })} />
@@ -249,8 +257,8 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             <div className="seg" data-tour="perf">
               <button type="button" className={preset === "defaults" ? "active" : ""} onClick={() => saveGraphics(PRESETS.defaults)}>Roblox defaults (off)</button>
               <button type="button" className={preset === "balanced" ? "active" : ""} onClick={() => saveGraphics(PRESETS.balanced)}>Balanced (30 FPS)</button>
-              <button type="button" className={preset === "max" && !is23s(lim) ? "active" : ""} onClick={() => saveGraphics(PRESETS.max)}>Max alts (5 FPS, lowest)</button>
-              <button type="button" className={preset === "max" && is23s(lim) ? "active" : ""} title="Max alts, plus: minimize on launch, start tiny, 5% CPU in the background, efficiency mode and memory trim every 5 minutes." onClick={async () => { await saveGraphics(PRESETS.max); await saveLimits(LIMITS_23S); }}>23S (many alts)</button>
+              <button type="button" className={preset === "max" && !(is23s(lim) && g.mute_volume) ? "active" : ""} onClick={() => saveGraphics(PRESETS.max)}>Max alts (5 FPS, lowest)</button>
+              <button type="button" className={preset === "max" && is23s(lim) && g.mute_volume ? "active" : ""} title="Max alts, plus: volume 0, minimize on launch, start tiny, 5% CPU in the background, efficiency mode and memory trim every 5 minutes." onClick={async () => { await saveGraphics({ ...PRESETS.max, mute_volume: true }); await saveLimits(LIMITS_23S); }}>23S (many alts)</button>
               {preset === "custom" && <button type="button" className="active">Your own mix</button>}
             </div>
           </div>

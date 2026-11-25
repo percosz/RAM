@@ -4,6 +4,21 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.7.0 (2026-11-25)
+
+### New
+- **Notifications when a client drops** (Settings, under Rejoin): a Windows notification when a client is disconnected, crashes, is replaced by another sign-in or has its sign-in refused. Never for a client you closed yourself. Several at once make one notification, names follow Hide names, and it says when RAM is rejoining. **Send a test notification** is next to the switch. Windows holds notifications back during a full-screen game; to let RAM through, add it under Windows Settings → System → Notifications → Set priority notifications.
+
+### Changed
+- **Accounts join back to back.** Each launch used to wait for the client before it to finish loading, up to a minute, before the next one started: the alt settings were written, read by that one client and put back, every time. Now they are written once, every account that uses the same settings starts right after the one before (only your *Seconds between launches* apart), and your own settings are put back once the last client has read them. A batch is ordered so accounts with different settings (Main, Full quality, their own FPS cap) are grouped, and the wait happens once per group.
+- **The Clients tab is gone.** **Minimize all** and **Restore all** are in the status bar, on every screen.
+- **RAM rests while minimized.** Its page stops drawing and fetching, and the built-in browser engine is asked to give memory back, until the window is shown again.
+- The **23S** preset also turns on **Volume 0** for alt clients.
+
+### Fixed
+- **"Not responding" on a busy PC.** With many clients open, RAM's window froze for up to a minute when you switched away from it or back. Three causes, all fixed: every command from the page ran on the window's own thread and waited there whenever the client watcher was busy (they now run in the background); RAM competed with the game clients for CPU at the same priority (RAM and its browser engine now run above normal); and Windows paged RAM's memory out when the clients filled it (RAM's own memory is now kept in place).
+- **A tiny, unclickable RAM window after minimizing.** That was the stand-in Windows shows for a frozen window. Besides no longer freezing, RAM puts its window back to its last size if it ever comes back smaller than a usable one.
+
 ## 0.6.4 (2026-11-23)
 
 ### New

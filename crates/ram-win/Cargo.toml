@@ -26,6 +26,7 @@ features = [
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
+    "Win32_System_Memory",
     "Win32_System_Performance",
     "Win32_System_ProcessStatus",
     "Win32_System_Registry",

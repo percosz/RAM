@@ -98,15 +98,6 @@ pub struct LaunchEvent {
     pub message: String,
 }
 
-#[derive(Serialize, Clone)]
-pub struct ClientView {
-    pub pid: u32,
-    pub account: Option<AccountId>,
-    pub account_name: Option<String>,
-    pub working_set_mb: u64,
-    pub private_mb: u64,
-}
-
 pub fn vault_status(s: &AppState) -> VaultStatus {
     VaultStatus {
         configured: s.vault.is_configured(),

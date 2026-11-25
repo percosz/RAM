@@ -111,8 +111,13 @@
 .perf-row .ctl .input { width: 84px; }
 .perf-sub { margin-left: 14px; padding-left: 12px; border-left: 2px solid var(--border); }
 
-/* Clients */
-.clients { padding: 14px; overflow: auto; }
+/* Status bar: every client at once */
+.statusbar { white-space: nowrap; overflow: hidden; }
+.sb-actions { display: inline-flex; gap: 6px; }
+.sb-btn { font: inherit; color: inherit; background: none; border: 1px solid var(--border); border-radius: 5px; padding: 1px 8px; line-height: 16px; cursor: pointer; }
+.sb-btn:hover { color: var(--text); border-color: var(--accent); }
+.sb-btn:active { transform: translateY(1px); }
+@media (max-width: 1040px) { .statusbar .legend { display: none; } }
 
 /* Diagnostics: crash history and the debug log */
 .diag { display: flex; flex-direction: column; min-height: 0; height: 100%; }

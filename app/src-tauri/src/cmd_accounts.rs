@@ -10,13 +10,13 @@ fn lock<'a>(state: &'a State<'_, Shared>) -> Result<std::sync::MutexGuard<'a, cr
     state.lock().map_err(|_| "application state is unavailable".to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot(state: State<'_, Shared>) -> Result<Snapshot, String> {
     let s = lock(&state)?;
     Ok(dto::snapshot(&s))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_account(state: State<'_, Shared>, username: String, alias: String) -> Result<AccountView, String> {
     let name = username.trim();
     if name.len() < 3 || name.len() > 20 || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
@@ -35,7 +35,7 @@ pub fn add_account(state: State<'_, Shared>, username: String, alias: String) ->
     dto::account_view(&s, id).ok_or_else(|| "account not found".into())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_account(state: State<'_, Shared>, patch: AccountPatch) -> Result<AccountView, String> {
     let mut s = lock(&state)?;
     {
@@ -68,7 +68,7 @@ pub fn update_account(state: State<'_, Shared>, patch: AccountPatch) -> Result<A
     dto::account_view(&s, patch.id).ok_or_else(|| "account not found".into())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_accounts(state: State<'_, Shared>, ids: Vec<AccountId>) -> Result<(), String> {
     let mut s = lock(&state)?;
     for id in &ids {
@@ -85,7 +85,7 @@ pub fn remove_accounts(state: State<'_, Shared>, ids: Vec<AccountId>) -> Result<
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_main(state: State<'_, Shared>, id: Option<AccountId>) -> Result<(), String> {
     let mut s = lock(&state)?;
     if let Some(id) = id {
@@ -98,7 +98,7 @@ pub fn set_main(state: State<'_, Shared>, id: Option<AccountId>) -> Result<(), S
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reorder_accounts(state: State<'_, Shared>, ids: Vec<AccountId>) -> Result<(), String> {
     let mut s = lock(&state)?;
     let mut ordered: Vec<Account> = Vec::with_capacity(s.store.accounts.len());
@@ -114,7 +114,7 @@ pub fn reorder_accounts(state: State<'_, Shared>, ids: Vec<AccountId>) -> Result
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_settings(app: AppHandle, state: State<'_, Shared>, settings: Settings) -> Result<Settings, String> {
     let mut s = lock(&state)?;
     let multi_changed = s.store.settings.multi_instance != settings.multi_instance;
@@ -131,7 +131,7 @@ pub fn set_settings(app: AppHandle, state: State<'_, Shared>, settings: Settings
 
 /// Saves a place to the launch bar's list, or takes it off. The built-in
 /// place always stays.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn place_pin(state: State<'_, Shared>, place_id: u64, pinned: bool) -> Result<(), String> {
     if place_id == 0 {
         return Err("Enter a place ID first.".into());
@@ -147,7 +147,7 @@ pub fn place_pin(state: State<'_, Shared>, place_id: u64, pinned: bool) -> Resul
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_graphics(state: State<'_, Shared>, graphics: ram_core::client_settings::GraphicsSettings) -> Result<ram_core::client_settings::GraphicsSettings, String> {
     ram_core::client_settings::validate_custom(&graphics.custom_flags)?;
     let mut s = lock(&state)?;
@@ -161,7 +161,7 @@ pub fn set_graphics(state: State<'_, Shared>, graphics: ram_core::client_setting
 /// Saves the client limits. The bandwidth limit is a system QoS policy and
 /// is applied separately (`apply_bandwidth`), because it needs an
 /// administrator prompt.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_limits(state: State<'_, Shared>, limits: ram_core::model::LimitSettings) -> Result<ram_core::model::LimitSettings, String> {
     let mut s = lock(&state)?;
     let mut l = limits;
@@ -176,7 +176,7 @@ pub fn set_limits(state: State<'_, Shared>, limits: ram_core::model::LimitSettin
     Ok(s.store.limits.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_data_folder(app: tauri::AppHandle, state: State<'_, Shared>) -> Result<String, String> {
     use tauri_plugin_opener::OpenerExt;
     let dir = {

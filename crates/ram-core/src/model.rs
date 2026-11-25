@@ -597,6 +597,10 @@ pub struct Settings {
     pub backdrop: String,
     /// Keep RAM's window above every other window.
     pub always_on_top: bool,
+    /// Show a Windows notification when a client is disconnected, crashes,
+    /// is replaced by another sign-in, or has its sign-in refused.
+    #[serde(default = "yes")]
+    pub notify_ended: bool,
     /// How much of the theme's colour covers the desktop when a backdrop is
     /// on, in percent (lower is more see-through).
     #[serde(default = "default_backdrop_tint")]
@@ -641,6 +645,7 @@ impl Default for Settings {
             presence_every_secs: default_presence_secs(),
             backdrop: String::new(),
             always_on_top: false,
+            notify_ended: true,
             backdrop_tint: default_backdrop_tint(),
             browser: String::new(),
             window: None,

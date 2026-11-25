@@ -31,6 +31,9 @@ handler, which is what the "on this PC" notes refer to.
 | Roblox headshots | Verified | No | `thumbnails.roblox.com` batch of up to 100 ids, no cookie; URLs cached a day in `store.json`; initials until the image loads. Real headshots loaded for the demo ids. |
 | Groups, aliases, notes, favorites, Main pin | Verified | No | Main is excluded from Select All (Ctrl+A), from batch launches and from every performance setting. |
 | Row sizes Compact / Normal / Comfortable / Large | Verified | No | Compact screenshotted at the 900×560 minimum. |
+| Windows notification when a client is disconnected, crashes, is replaced or has its sign-in refused | Conditional | **Yes** | The text (one named, several counted, names masked, rejoin note) is unit-tested. A test notification from a build with no shortcut was accepted by Windows and appeared in the notification centre; a notification for a real client ending was not observed. Windows holds banners back during a full-screen game unless RAM is a priority app. |
+| Back-to-back launches: accounts with the same alt settings share one write and one restore | Conditional | **Yes** | The batch ordering is unit-tested. The shared session (write once, restore after the last client's read mark or 120 s) was not exercised with real Roblox clients. |
+| Window stays responsive while the watcher is busy | Verified | No | Test build with the state locked 6 s at a time: commands waited up to 5.9 s, the window answered a no-op message in at most 11 ms across 50 probes, was never flagged as hung, and survived minimize and restore. Not measured under real memory pressure. |
 | Auto-rejoin after a disconnect or crash, the way the account last joined | Conditional | **Yes** | The policy (which endings, spacing, cap, reset, fallback target) is unit-tested. The scheduler itself was not exercised with a real Roblox client: no rejoin has been observed end to end. |
 | Presence per account (in game here / elsewhere, online), checked every 45 s (adjustable, 10 to 60 s) with the account's own cookie | Conditional | **Yes** | Parsing, the signed-in request (CSRF handshake) and error handling are unit-tested, and a live anonymous request returned the documented shape. The signed-in answer for an account that is really in a game was not observed. |
 | Warning before launching an account that is in a game (Launch anyway / Skip / Cancel) | Verified | No | All three choices checked end to end on demo data with a substituted presence answer and launches swallowed. |
@@ -141,7 +144,7 @@ handler, which is what the "on this PC" notes refer to.
 | Feature | Status | Needs live test | Notes |
 |---|---|---|---|
 | List running Roblox clients (PID, start time, linked account) | Conditional | Yes | Process snapshot; tested with stand-in processes. |
-| Close a client (normal window close, never terminate) | Conditional | Yes | Tested with a stand-in window; recorded as Closed, not a crash. |
+| Close a client (normal window close, never terminate) | Unavailable | — | Was a button on the Clients tab, which 0.7 removed. RAM still closes a rejoined client that never gets into a game. |
 | CPU/memory per client, priority and efficiency presets, CPU limit, tiling | Unavailable | — | Present in `ram-core`/`ram-win` from v0.1 but not wired into the UI. |
 
 ## Import and export

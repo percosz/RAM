@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Users, Activity, Settings as SettingsIcon, Lock, Unlock, ShieldOff, Stethoscope, ArrowDownToLine } from "lucide-react";
+import { Users, Settings as SettingsIcon, Lock, Unlock, ShieldOff, Stethoscope, ArrowDownToLine } from "lucide-react";
 import { api } from "./api";
 import { AppProvider, useApp } from "./store";
 import { Toasts } from "./components";
 import { AccountsView } from "./views/Accounts";
 import { SettingsView } from "./views/Settings";
-import { ClientsView } from "./views/Clients";
 import { DiagnosticsView } from "./views/Diagnostics";
 import { UpdateDialog, WhatsNewDialog } from "./views/Updates";
 import { Tour } from "./views/Tour";
@@ -16,10 +15,10 @@ import "./styles/app.css";
 import "./styles/themes.css";
 import "./styles/themes2.css";
 
-type View = "accounts" | "clients" | "diagnostics" | "settings";
+type View = "accounts" | "diagnostics" | "settings";
 
 function Shell() {
-  const { snap, accounts, selected, setSelected, toasts, dismissToast, refresh, update, crashCount, saveSettings } = useApp();
+  const { snap, accounts, selected, setSelected, toasts, dismissToast, refresh, update, crashCount, saveSettings, toast } = useApp();
   const [view, setView] = useState<View>("accounts");
   const [unlock, setUnlock] = useState(false);
   const [showUpdate, setShowUpdate] = useState(false);
@@ -64,7 +63,7 @@ function Shell() {
     if (hinted || !snap) return;
     setHinted(true);
     api.startHint().then(([v, first, dialog]) => {
-      if (v === "clients" || v === "settings" || v === "accounts" || v === "diagnostics") setView(v);
+      if (v === "settings" || v === "accounts" || v === "diagnostics") setView(v);
       if (first && snap.accounts.length) setSelected([snap.accounts[0]!.id]);
       if (dialog.startsWith("tour")) setTour(Number(dialog.split(":")[1] ?? 0) || 0);
       else if (dialog === "bottom") window.setTimeout(() => document.querySelector(".settings")?.scrollTo(0, 1e6), 400);
@@ -79,6 +78,14 @@ function Shell() {
   // older data file with none recorded gets the notes once.)
   const whatsNew = !!snap && snap.settings.seen_version !== snap.version;
 
+  // Every open Roblox client at once; never takes focus from the user.
+  const allClients = async (minimize: boolean) => {
+    try {
+      const n = await api.clientsMinimizeAll(minimize);
+      toast(n ? `${minimize ? "Minimized" : "Restored"} ${n} client${n === 1 ? "" : "s"}.` : "No Roblox clients are open.");
+    } catch (e) { toast(String(e), "bad"); }
+  };
+
   const vaultPill = vault && (
     <div
       data-tour="vault"
@@ -92,7 +99,7 @@ function Shell() {
       </span>
     </div>
   );
-  const tabs: Array<[View, string, React.ReactNode]> = [["accounts", "Accounts", <Users />], ["clients", "Clients", <Activity />], ["diagnostics", "Diagnostics", <Stethoscope />], ["settings", "Settings", <SettingsIcon />]];
+  const tabs: Array<[View, string, React.ReactNode]> = [["accounts", "Accounts", <Users />], ["diagnostics", "Diagnostics", <Stethoscope />], ["settings", "Settings", <SettingsIcon />]];
 
   return (
     <div className="shell">
@@ -123,7 +130,6 @@ function Shell() {
       <Splitter kind="sidebar" />
       <main className="content">
         {view === "accounts" && <AccountsView onNeedUnlock={() => setUnlock(true)} />}
-        {view === "clients" && <ClientsView />}
         {view === "diagnostics" && <DiagnosticsView />}
         {view === "settings" && <SettingsView onNeedUnlock={() => setUnlock(true)} onShowUpdate={() => setShowUpdate(true)} onShowTour={() => setTour(0)} />}
       </main>
@@ -132,6 +138,10 @@ function Shell() {
         <span><b>{accounts.length}</b> accounts</span>
         <span><b className="good">{valid}</b> valid</span>
         <span><b className="good">{running}</b> in game</span>
+        <span className="sb-actions" data-tour="clients-bar">
+          <button className="sb-btn" onClick={() => void allClients(true)} title="Minimize every open Roblox client, Main included. Never takes focus from the window you are in.">Minimize all</button>
+          <button className="sb-btn" onClick={() => void allClients(false)} title="Bring every minimized Roblox client back.">Restore all</button>
+        </span>
         {snap?.startup_note && <span className="warn ellipsis" title={snap.startup_note}>{snap.startup_note}</span>}
         <span className="legend">
           <span className="good"><i className="dot" /> valid</span>

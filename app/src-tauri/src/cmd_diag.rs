@@ -259,10 +259,120 @@ fn find_log(dir: &Path, start: i64, skew: i64, taken: &[PathBuf], trackers: &[St
 
 /// Starts the watcher thread.
 pub fn spawn_watcher(app: AppHandle) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(2));
-        tick(&app);
+    std::thread::spawn(move || {
+        register_notifications(&app);
+        let kept = ram_win::process::keep_resident();
+        if let Ok(s) = app.state::<Shared>().lock() {
+            s.log.debug(&format!("memory: RAM's own pages kept in memory: {kept}"));
+        }
+        let mut ticks: u32 = 0;
+        loop {
+            std::thread::sleep(Duration::from_secs(2));
+            // Keep RAM's own window ahead of the game clients for CPU time.
+            // Repeated because WebView2 starts new helper processes over time.
+            if ticks % 30 == 1 {
+                let n = ram_win::process::boost_own_processes();
+                if ticks == 1 {
+                    if let Ok(s) = app.state::<Shared>().lock() {
+                        s.log.debug(&format!("priority: {n} of RAM's own processes set to above normal"));
+                    }
+                }
+            }
+            ticks = ticks.wrapping_add(1);
+            // Auto-lock for a master-password vault. Timed here and not by
+            // the page, so it also happens while the window is minimized.
+            let locked = app.state::<Shared>().lock().map(|mut s| s.vault.tick(now())).unwrap_or(false);
+            if locked {
+                let _ = app.emit("vault-locked", ());
+            }
+            tick(&app);
+            // Test hook, debug builds only: keep the state locked for a while,
+            // the way a slow tick on an overloaded PC does, so a test can
+            // check that the window still answers meanwhile.
+            #[cfg(debug_assertions)]
+            if let Some(secs) = std::env::var("RAM_TEST_HOLD_LOCK_SECS").ok().and_then(|v| v.parse::<u64>().ok()) {
+                if let Ok(_held) = app.state::<Shared>().lock() {
+                    std::thread::sleep(Duration::from_secs(secs));
+                }
+            }
+        }
     });
+}
+
+/// The icon Windows shows on RAM's notifications.
+const NOTIFY_ICON: &[u8] = include_bytes!("../icons/icon.png");
+
+/// Tells Windows who RAM's notifications are from (name and icon). Without
+/// this a copy with no Start menu shortcut, the portable build, has its
+/// notifications dropped without any error.
+fn register_notifications(app: &AppHandle) {
+    let Some(dir) = app.state::<Shared>().lock().ok().map(|s| s.data_dir.clone()) else { return };
+    let icon = dir.join("notification-icon.png");
+    if std::fs::metadata(&icon).map(|m| m.len() != NOTIFY_ICON.len() as u64).unwrap_or(true) {
+        let _ = std::fs::write(&icon, NOTIFY_ICON);
+    }
+    let ok = ram_win::notify::register_app_id(&app.config().identifier, "RAM", icon.is_file().then_some(icon.as_path()));
+    if let Ok(s) = app.state::<Shared>().lock() {
+        s.log.debug(&format!("notifications: registered with Windows: {ok}"));
+    }
+}
+
+/// Shows a notification on request, so the user can see that Windows lets
+/// RAM's notifications through.
+#[tauri::command(async)]
+pub fn notify_test(app: AppHandle) -> Result<(), String> {
+    show_notice(&app, "RAM notifications are on", "You will get one of these when a client is disconnected or crashes.")
+}
+
+/// One Windows notification, with the standard notification sound.
+fn show_notice(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification().builder().title(title).body(body).sound("Default").show().map_err(|e| e.to_string())
+}
+
+/// "Tho********" when names are hidden.
+fn shown_name(username: &str, hide: bool) -> String {
+    if hide && !username.is_empty() {
+        format!("{}********", username.chars().take(3).collect::<String>())
+    } else {
+        username.to_string()
+    }
+}
+
+/// Title and text of the Windows notification for the clients that ended
+/// in one watcher tick. One client is named with what happened; several are
+/// counted, so a PC-wide failure is one notification and not thirty.
+pub fn ended_notice(ended: &[(String, EndKind, i64)], rejoining: usize) -> Option<(String, String)> {
+    let first = ended.first()?;
+    let after = |secs: i64| if secs >= 3600 { format!("{} h {} min", secs / 3600, (secs % 3600) / 60) } else if secs >= 60 { format!("{} min", secs / 60) } else { format!("{secs} s") };
+    let rejoin = match rejoining {
+        0 => String::new(),
+        n if n == ended.len() => " Rejoining.".to_string(),
+        n => format!(" Rejoining {n}."),
+    };
+    if ended.len() == 1 {
+        let (name, kind, uptime) = first;
+        let what = match kind {
+            EndKind::Disconnected => "was disconnected by Roblox",
+            EndKind::Crashed => "crashed",
+            EndKind::Replaced => "was replaced by another sign-in",
+            EndKind::SignedOut => "had its sign-in refused",
+            EndKind::Closed | EndKind::Teleported => return None,
+        };
+        let who = if name.is_empty() { "A client".to_string() } else { name.clone() };
+        return Some((format!("{who} {what}"), format!("After {}.{rejoin}", after(*uptime))));
+    }
+    let count = |k: EndKind| ended.iter().filter(|(_, kind, _)| *kind == k).count();
+    let mut parts = Vec::new();
+    for (k, label) in [(EndKind::Crashed, "crashed"), (EndKind::Disconnected, "disconnected"), (EndKind::Replaced, "replaced by another sign-in"), (EndKind::SignedOut, "sign-in refused")] {
+        let n = count(k);
+        if n > 0 {
+            parts.push(format!("{n} {label}"));
+        }
+    }
+    let names: Vec<&str> = ended.iter().map(|(n, _, _)| n.as_str()).filter(|n| !n.is_empty()).take(4).collect();
+    let more = if ended.len() > names.len() && !names.is_empty() { ", …" } else { "" };
+    Some((format!("{} clients ended", ended.len()), format!("{}: {}{more}.{rejoin}", parts.join(", "), names.join(", "))))
 }
 
 fn tick(app: &AppHandle) {
@@ -497,6 +607,7 @@ fn tick(app: &AppHandle) {
     }
 
     // Gone clients: classify and record.
+    let mut ended_named: Vec<(String, EndKind, i64)> = Vec::new();
     let gone: Vec<ProcKey> = keys.iter().copied().filter(|k| !alive.contains(k)).collect();
     let mut recorded = 0;
     for key in gone {
@@ -541,6 +652,7 @@ fn tick(app: &AppHandle) {
         if w.account.is_none() {
             continue;
         }
+        ended_named.push((shown_name(&username, s.store.settings.hide_usernames), kind, uptime));
         s.store.push_crash(CrashRecord {
             id: 0,
             account: w.account,
@@ -588,9 +700,16 @@ fn tick(app: &AppHandle) {
         s.log.info(&format!("rejoin: launching account {id}, attempt {}{}", r.attempts, if r.fallback { " (fallback target)" } else { "" }));
         rejoins.push((id, target, model));
     }
+    let notify = s.store.settings.notify_ended;
+    let rejoining = notes.iter().filter(|(_, state, _)| *state == "Launching").count();
     drop(s);
     if recorded > 0 {
         let _ = app.emit("crashes-changed", recorded);
+    }
+    if notify {
+        if let Some((title, body)) = ended_notice(&ended_named, rejoining) {
+            let _ = show_notice(app, &title, &body);
+        }
     }
     for id in seen_running {
         let _ = app.emit("launch-status", crate::dto::LaunchEvent { account: id, state: "Running".into(), message: String::new() });
@@ -645,7 +764,7 @@ fn schedule_rejoin(s: &mut crate::state::AppState, id: AccountId, kind: EndKind,
 
 /// Minimizes (or restores) every running Roblox client. Returns how many
 /// windows were asked.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clients_minimize_all(state: State<'_, Shared>, minimize: bool) -> Result<u32, String> {
     let pids: Vec<u32> = {
         let s = lock(&state)?;
@@ -680,7 +799,7 @@ fn lock<'a>(state: &'a State<'_, Shared>) -> Result<std::sync::MutexGuard<'a, cr
     state.lock().map_err(|_| "application state is unavailable".to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn crashes_list(state: State<'_, Shared>) -> Result<Vec<CrashView>, String> {
     let s = lock(&state)?;
     Ok(s.store
@@ -702,7 +821,7 @@ pub fn crashes_list(state: State<'_, Shared>) -> Result<Vec<CrashView>, String> 
         .collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn crashes_clear(state: State<'_, Shared>) -> Result<(), String> {
     let mut s = lock(&state)?;
     s.store.crashes.clear();
@@ -710,7 +829,7 @@ pub fn crashes_clear(state: State<'_, Shared>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn crash_open_log(app: AppHandle, state: State<'_, Shared>, id: u64) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let path = {
@@ -723,7 +842,7 @@ pub fn crash_open_log(app: AppHandle, state: State<'_, Shared>, id: u64) -> Resu
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn crashes_export(state: State<'_, Shared>, path: String) -> Result<(), String> {
     let rows: Vec<Vec<String>> = {
         let s = lock(&state)?;
@@ -746,7 +865,7 @@ pub fn crashes_export(state: State<'_, Shared>, path: String) -> Result<(), Stri
     std::fs::write(&path, text.as_bytes()).map_err(|e| format!("could not write the file: {e}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn log_tail(state: State<'_, Shared>, lines: usize) -> Result<Vec<LogLineView>, String> {
     let s = lock(&state)?;
     Ok(s.log
@@ -764,7 +883,7 @@ pub fn log_tail(state: State<'_, Shared>, lines: usize) -> Result<Vec<LogLineVie
         .collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_log_folder(app: AppHandle, state: State<'_, Shared>) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let dir = {
@@ -777,7 +896,7 @@ pub fn open_log_folder(app: AppHandle, state: State<'_, Shared>) -> Result<(), S
 /// A shareable report: version, environment, settings, the last log lines
 /// and the tail of the newest client logs, with secrets, user names and
 /// paths masked.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn diagnostics_text(state: State<'_, Shared>) -> Result<String, String> {
     let s = lock(&state)?;
     let launcher = ram_win::launcher_info::detect();
@@ -840,6 +959,19 @@ pub fn diagnostics_text(state: State<'_, Shared>) -> Result<String, String> {
 #[cfg(test)]
 mod rejoin_tests {
     use super::*;
+
+    #[test]
+    fn one_ending_is_named_and_many_are_counted() {
+        let one = vec![("Thornwick_Eli".to_string(), EndKind::Disconnected, 2040)];
+        assert_eq!(ended_notice(&one, 1), Some(("Thornwick_Eli was disconnected by Roblox".into(), "After 34 min. Rejoining.".into())));
+        assert_eq!(ended_notice(&[("".into(), EndKind::Crashed, 45)], 0), Some(("A client crashed".into(), "After 45 s.".into())));
+        assert_eq!(ended_notice(&[("a".into(), EndKind::Replaced, 7300)], 0).unwrap().1, "After 2 h 1 min.");
+        let many: Vec<(String, EndKind, i64)> = (0..6).map(|i| (format!("alt{i}"), if i < 4 { EndKind::Crashed } else { EndKind::Disconnected }, 100)).collect();
+        assert_eq!(ended_notice(&many, 2), Some(("6 clients ended".into(), "4 crashed, 2 disconnected: alt0, alt1, alt2, alt3, …. Rejoining 2.".into())));
+        assert_eq!(ended_notice(&[], 0), None);
+        assert_eq!(shown_name("Thornwick_Eli", true), "Tho********");
+        assert_eq!(shown_name("Thornwick_Eli", false), "Thornwick_Eli");
+    }
 
     fn last(target: LaunchTarget, fallback_place: Option<u64>) -> LastLaunch {
         LastLaunch { model_target: Target::Place { place_id: 0 }, target, fallback_place }

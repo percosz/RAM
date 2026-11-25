@@ -451,14 +451,14 @@ fn sign_in_one(app: &AppHandle, dir: &std::path::Path, item: &QueueItem, save_pa
 }
 
 /// Skips the account the queue is waiting on.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn signin_queue_skip(state: State<'_, Shared>) -> Result<(), String> {
     lock(&state)?.signin_queue.skip = true;
     Ok(())
 }
 
 /// Stops the queue; accounts already signed in stay.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn signin_queue_stop(state: State<'_, Shared>) -> Result<(), String> {
     lock(&state)?.signin_queue.stop = true;
     Ok(())
@@ -466,7 +466,7 @@ pub fn signin_queue_stop(state: State<'_, Shared>) -> Result<(), String> {
 
 /// Sign in with Roblox: opens the sign-in page in the user's browser on a
 /// profile of its own. The front-end then polls `signin_poll`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn signin_start(state: State<'_, Shared>) -> Result<String, String> {
     let (dir, choice) = {
         let s = lock(&state)?;
@@ -529,7 +529,7 @@ pub async fn signin_poll(app: AppHandle) -> Result<SignInPoll, String> {
 }
 
 /// Closes the sign-in window without capturing anything.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn signin_cancel(state: State<'_, Shared>) -> Result<(), String> {
     let dir = {
         let s = lock(&state)?;

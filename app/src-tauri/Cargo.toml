@@ -1,6 +1,6 @@
 [package]
 name = "ram-tauri"
-version = "0.6.4"
+version = "0.7.0"
 edition.workspace = true
 license.workspace = true
 description = "RAM: a Roblox account manager (Tauri shell)."
@@ -33,4 +33,10 @@ serde_json.workspace = true
 ram-core = { path = "../../crates/ram-core" }
 ram-win = { path = "../../crates/ram-win" }
 tauri-plugin-updater = "2"
+tauri-plugin-notification = "2"
 zeroize = "1"
+
+[target.'cfg(windows)'.dependencies]
+# The same versions wry already builds with; used for one WebView2 call.
+webview2-com = "0.39"
+windows-core = "0.62"

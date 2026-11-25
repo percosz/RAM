@@ -25,6 +25,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
+        .on_window_event(window::on_event)
         .manage::<Shared>(Mutex::new(AppState::init()))
         .manage(cmd_update::UpdateSlot::default())
         .invoke_handler(tauri::generate_handler![
@@ -49,7 +51,6 @@ pub fn run() {
             cmd_vault::vault_change_password,
             cmd_vault::vault_remove,
             cmd_vault::vault_options,
-            cmd_vault::vault_tick,
             cmd_vault::cookie_set,
             cmd_vault::cookie_remove,
             cmd_vault::cookie_reveal,
@@ -73,9 +74,8 @@ pub fn run() {
             cmd_io::import_scan,
             cmd_io::import_apply,
             cmd_io::export_accounts,
-            cmd_io::clients_snapshot,
-            cmd_io::close_client,
             cmd_diag::clients_minimize_all,
+            cmd_diag::notify_test,
             cmd_diag::apply_bandwidth,
             cmd_diag::crashes_list,
             cmd_diag::crashes_clear,
