@@ -141,16 +141,35 @@ fn version_key(v: &str) -> (u32, u32, u32) {
     (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
 }
 
+/// The version a patch release patches: the newest version in the
+/// CHANGELOG that is older than `current` and on the same `major.minor`
+/// line, if `current` is not the first of its line.
+fn patched_by(changelog: &str, current: &str) -> Option<(u32, u32, u32)> {
+    let cur = version_key(current);
+    changelog
+        .lines()
+        .filter_map(|l| l.strip_prefix("## "))
+        .map(|rest| rest.trim().split_whitespace().next().unwrap_or("").trim_start_matches('v'))
+        .filter(|v| v.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map(version_key)
+        .filter(|k| *k < cur && (k.0, k.1) == (cur.0, cur.1))
+        .max()
+}
+
 /// The CHANGELOG sections for every version after `seen` up to and
 /// including `current`, newest first, each under its `## <version>`
-/// heading. With `seen` empty (never recorded) or not older than `current`,
-/// only the section for `current`, without a heading.
+/// heading. A patch release (0.7.2) also keeps the log of the release it
+/// patches (0.7.1), even when that one was already seen: a patch's own
+/// notes are short, and the release it belongs to is what people updated
+/// for. With nothing but the section for `current` to show, that section
+/// alone, without a heading.
 pub fn notes_since(changelog: &str, seen: &str, current: &str) -> String {
     let cur = version_key(current);
-    let from = version_key(seen);
+    let mut from = version_key(seen);
     if seen.trim().is_empty() || from >= cur {
-        return notes_for(changelog, current);
+        from = cur;
     }
+    let patched = patched_by(changelog, current);
     let mut out = String::new();
     let mut sections = 0;
     let mut inside = false;
@@ -158,7 +177,7 @@ pub fn notes_since(changelog: &str, seen: &str, current: &str) -> String {
         if let Some(rest) = line.strip_prefix("## ") {
             let v = rest.trim().split_whitespace().next().unwrap_or("").trim_start_matches('v');
             let key = version_key(v);
-            inside = v.chars().next().is_some_and(|c| c.is_ascii_digit()) && key > from && key <= cur;
+            inside = v.chars().next().is_some_and(|c| c.is_ascii_digit()) && key <= cur && (key > from || key == cur || Some(key) == patched);
             if inside {
                 sections += 1;
                 let kept = out.trim_end().len();
@@ -226,13 +245,23 @@ mod tests {
         let log = "# Changelog\n\nIntro.\n\n## 0.5.0 (2026-11-22)\n- Five\n\n## 0.4.10\n- Ten\n\n## 0.4.2\n- Two\n\n## 0.4.1\n- One\n";
         // Updated across several versions: all of them, newest first, with headings.
         assert_eq!(notes_since(log, "0.4.1", "0.5.0"), "## 0.5.0\n- Five\n\n## 0.4.10\n- Ten\n\n## 0.4.2\n- Two");
-        // 0.4.10 is newer than 0.4.2 (numbers, not text).
-        assert_eq!(notes_since(log, "0.4.2", "0.4.10"), "- Ten");
+        // 0.4.10 is newer than 0.4.2 (numbers, not text). It is a patch, so
+        // the log of the release it patches (0.4.2) is kept below its own,
+        // although that one was seen before; 0.4.1 is not.
+        assert_eq!(notes_since(log, "0.4.2", "0.4.10"), "## 0.4.10\n- Ten\n\n## 0.4.2\n- Two");
+        assert_eq!(notes_since(log, "0.4.1", "0.4.2"), "## 0.4.2\n- Two\n\n## 0.4.1\n- One");
+        // Coming from further back: everything skipped, as before.
+        assert_eq!(notes_since(log, "0.4.1", "0.4.10"), "## 0.4.10\n- Ten\n\n## 0.4.2\n- Two");
+        // The first release of a line patches nothing.
+        assert_eq!(patched_by(log, "0.5.0"), None);
+        assert_eq!(patched_by(log, "0.4.10"), Some((0, 4, 2)));
+        assert_eq!(patched_by(log, "0.4.1"), None);
         // One step, nothing recorded, same version, or a downgrade: just the current section.
         assert_eq!(notes_since(log, "0.4.10", "0.5.0"), "- Five");
         assert_eq!(notes_since(log, "", "0.5.0"), "- Five");
         assert_eq!(notes_since(log, "0.5.0", "0.5.0"), "- Five");
-        assert_eq!(notes_since(log, "0.9.0", "0.4.2"), "- Two");
+        assert_eq!(notes_since(log, "0.9.0", "0.4.1"), "- One");
+        assert_eq!(notes_since(log, "", "0.4.2"), "## 0.4.2\n- Two\n\n## 0.4.1\n- One");
         assert_eq!(version_key("v1.2.3"), (1, 2, 3));
         assert_eq!(version_key("1.x"), (1, 0, 0));
     }

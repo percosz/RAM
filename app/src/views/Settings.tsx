@@ -81,6 +81,14 @@ function is23s(l: LimitSettings): boolean {
   return (Object.keys(LIMITS_23S) as Array<keyof LimitSettings>).every((k) => l[k] === LIMITS_23S[k]);
 }
 
+/** Roblox defaults also turns every running-client option off (the window
+ *  size fields keep their numbers). The bandwidth limit is a Windows policy
+ *  and is removed separately, because Windows asks for approval. */
+const LIMITS_OFF: Partial<LimitSettings> = { minimize_on_launch: false, tiny_on_launch: false, mute_on_launch: false, cpu_limit_percent: 0, efficiency_mode: false, trim_every_min: 0 };
+function limitsOff(l: LimitSettings): boolean {
+  return (Object.keys(LIMITS_OFF) as Array<keyof LimitSettings>).every((k) => l[k] === LIMITS_OFF[k]) && !l.bandwidth_kbps;
+}
+
 /** Which preset the current settings match, or "custom". */
 function presetOf(g: GraphicsSettings): "max" | "balanced" | "defaults" | "custom" {
   if (!g.enabled) return "defaults";
@@ -105,6 +113,15 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
   const g = snap.graphics;
   const lim = snap.limits;
   const preset = presetOf(g);
+  // "Roblox defaults" is only what is shown as active when nothing at all
+  // is being done to alt clients: no graphics and no running-client option.
+  const allOff = preset === "defaults" && limitsOff(lim);
+  const applyDefaults = async () => {
+    await saveGraphics(PRESETS.defaults);
+    await saveLimits(LIMITS_OFF);
+    // Only when one is set: removing it makes Windows ask for approval.
+    if (lim.bandwidth_kbps) await applyBandwidth(0);
+  };
   const applyBandwidth = async (kbps: number) => {
     setBwBusy(true);
     try { await api.applyBandwidth(kbps); await refresh(); toast(kbps ? `Bandwidth limit set to ${kbps} kbit/s.` : "Bandwidth limit removed.", "good"); }
@@ -258,11 +275,11 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
           </div>
           <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
             <div className="seg" data-tour="perf">
-              <button type="button" className={preset === "defaults" ? "active" : ""} onClick={() => saveGraphics(PRESETS.defaults)}>Roblox defaults (off)</button>
+              <button type="button" className={allOff ? "active" : ""} title="Turns everything on this card off: nothing is written to Roblox's settings, and every running-client option below (windows, sound, CPU, memory, network) is switched off." onClick={() => void applyDefaults()}>Roblox defaults (off)</button>
               <button type="button" className={preset === "balanced" ? "active" : ""} onClick={() => saveGraphics(PRESETS.balanced)}>Balanced (30 FPS)</button>
               <button type="button" className={preset === "max" && !(is23s(lim) && g.mute_volume) ? "active" : ""} onClick={() => saveGraphics(PRESETS.max)}>Max alts (5 FPS, lowest)</button>
               <button type="button" className={preset === "max" && is23s(lim) && g.mute_volume ? "active" : ""} title="Max alts, plus: volume 0, minimize on launch, start tiny, 5% CPU in the background, efficiency mode and memory trim every 5 minutes." onClick={async () => { await saveGraphics({ ...PRESETS.max, mute_volume: true }); await saveLimits(LIMITS_23S); }}>23S (many alts)</button>
-              {preset === "custom" && <button type="button" className="active">Your own mix</button>}
+              {(preset === "custom" || (preset === "defaults" && !allOff)) && <button type="button" className="active">Your own mix</button>}
             </div>
           </div>
           <div>

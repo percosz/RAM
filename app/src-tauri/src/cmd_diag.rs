@@ -259,10 +259,28 @@ fn find_log(dir: &Path, start: i64, skew: i64, taken: &[PathBuf], trackers: &[St
 
 /// Starts the watcher thread.
 /// How long RAM must be out of front before its browser engine's memory is
-/// handed back (so a quick switch away and back costs nothing), and how
-/// often that is repeated while it stays there.
+/// handed back (so a quick switch away and back costs nothing), how long
+/// the keyboard and mouse must have been still for the same to happen
+/// while RAM is the window in front, and how often it is repeated.
 const TRIM_AFTER_SECS: i64 = 6;
+const TRIM_IDLE_SECS: u64 = 5;
 const TRIM_EVERY_SECS: u64 = 30;
+
+/// Whether to hand the browser engine's memory back to Windows now.
+///
+/// Out of front: once RAM has been there for a few seconds. In front: only
+/// while nobody is using the keyboard or mouse, so it never happens in the
+/// middle of scrolling or typing. Either way at most once per
+/// [`TRIM_EVERY_SECS`]. What the page still uses comes straight back; what
+/// it only needed while starting, or for a screen you left, stays out.
+pub fn should_trim(background_secs: Option<i64>, input_idle_secs: u64, since_last_trim: Option<u64>) -> bool {
+    let due = since_last_trim.map_or(true, |s| s >= TRIM_EVERY_SECS);
+    let quiet = match background_secs {
+        Some(secs) => secs >= TRIM_AFTER_SECS,
+        None => input_idle_secs >= TRIM_IDLE_SECS,
+    };
+    due && quiet
+}
 
 pub fn spawn_watcher(app: AppHandle) {
     std::thread::spawn(move || {
@@ -275,19 +293,13 @@ pub fn spawn_watcher(app: AppHandle) {
         let mut trimmed: Option<std::time::Instant> = None;
         loop {
             std::thread::sleep(Duration::from_secs(2));
-            // While RAM is not the window in front, hand the memory of its
-            // browser engine back to Windows, and again every so often:
-            // what the page still uses comes straight back, the rest stays
-            // free for the game clients.
-            match crate::window::background_secs() {
-                Some(secs) if secs >= TRIM_AFTER_SECS => {
-                    if trimmed.map_or(true, |t| t.elapsed() >= Duration::from_secs(TRIM_EVERY_SECS)) {
-                        ram_win::process::trim_own_webviews();
-                        trimmed = Some(std::time::Instant::now());
-                    }
-                }
-                Some(_) => {}
-                None => trimmed = None,
+            // Hand the memory of RAM's browser engine back to Windows while
+            // RAM is out of front or nobody is touching the PC, and again
+            // every so often: what the page still uses comes straight back,
+            // the rest stays free for the game clients.
+            if should_trim(crate::window::background_secs(), ram_win::process::input_idle_secs(), trimmed.map(|t| t.elapsed().as_secs())) {
+                ram_win::process::trim_own_webviews();
+                trimmed = Some(std::time::Instant::now());
             }
             // Keep RAM's own window ahead of the game clients for CPU time.
             // Repeated because WebView2 starts new helper processes over time.
@@ -983,6 +995,22 @@ pub fn diagnostics_text(state: State<'_, Shared>) -> Result<String, String> {
 #[cfg(test)]
 mod rejoin_tests {
     use super::*;
+
+    #[test]
+    fn memory_is_handed_back_when_out_of_front_or_idle_but_not_while_in_use() {
+        // In front and in use: never.
+        assert!(!should_trim(None, 0, None));
+        assert!(!should_trim(None, 4, Some(600)));
+        // In front, hands off for 5 s: yes, then not again for 30 s.
+        assert!(should_trim(None, 5, None));
+        assert!(!should_trim(None, 60, Some(29)));
+        assert!(should_trim(None, 60, Some(30)));
+        // Out of front: after 6 s, whatever the keyboard and mouse are doing.
+        assert!(!should_trim(Some(5), 0, None));
+        assert!(should_trim(Some(6), 0, None));
+        assert!(!should_trim(Some(600), 0, Some(10)));
+        assert!(should_trim(Some(600), 0, Some(31)));
+    }
 
     #[test]
     fn one_ending_is_named_and_many_are_counted() {

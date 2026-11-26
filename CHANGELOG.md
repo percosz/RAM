@@ -4,6 +4,12 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.7.2 (2026-11-26)
+
+### Changed
+- **Less memory while RAM is the window in front.** The memory of RAM's browser engine was only handed back to Windows while RAM was behind another window. It now also happens in front, whenever the keyboard and mouse have been still for 5 seconds (at most every 30 seconds), so never in the middle of scrolling or typing. Measured on the release build with 12 accounts: about 6-17 MB while RAM sits in front untouched (was about 78 MB), rising to 45-60 MB while you scroll and switch tabs, and back down once you stop. Scrolling straight after a hand-back stayed at the display's full rate with no long frame.
+- **Roblox defaults (off)** now turns off everything on the Performance card: besides the graphics settings, every running-client option (minimize on launch, tiny windows, mute, CPU limit, efficiency mode, memory trim) is switched off, and a bandwidth limit is removed (Windows asks for approval for that one). With graphics off but a running-client option still on, the selector shows **Your own mix**.
+
 ## 0.7.1 (2026-11-26)
 
 ### New

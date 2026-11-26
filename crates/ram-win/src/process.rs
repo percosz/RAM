@@ -99,6 +99,18 @@ pub fn trim_own_webviews() -> usize {
     trimmed
 }
 
+/// Seconds since the last keyboard or mouse input anywhere on this PC
+/// (0 when Windows cannot say).
+pub fn input_idle_secs() -> u64 {
+    use windows::Win32::System::SystemInformation::GetTickCount;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    if !unsafe { GetLastInputInfo(&mut info) }.as_bool() {
+        return 0;
+    }
+    (unsafe { GetTickCount() }.wrapping_sub(info.dwTime) / 1000) as u64
+}
+
 /// Tells Windows not to page RAM's own memory out. When dozens of game
 /// clients fill the PC's memory, Windows takes pages from every process that
 /// is not in front; the manager then has to read its own code back from the

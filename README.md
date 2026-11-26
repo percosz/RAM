@@ -87,7 +87,8 @@ auto-updater verifies every update against RAM's own release signature.
   quality, paused lighting) plus your own FastFlags, written just before each
   batch of alt clients starts and put back once the last one has read them. Per-account FPS cap
   and *Full quality*; the **Main** account is never touched. Presets: Roblox
-  defaults (the starting point, nothing is written), Balanced (30 FPS), Max
+  defaults (the starting point: nothing is written and every running-client
+  option is off), Balanced (30 FPS), Max
   alts (5 FPS, lowest) and **23S**, which adds volume 0 and the running-client limits for
   a lot of alts at once. Volume 0 is an option.
 - **Running clients.** Minimize on launch, tiny windows, mute, a background
@@ -116,8 +117,10 @@ auto-updater verifies every update against RAM's own release signature.
   notifications are masked while it is on.
 - **Small in memory.** RAM's window is drawn by the processor, not the
   graphics card, and whenever RAM is not the window in front the memory of
-  its browser engine is handed back to Windows: about 78 MB in front, 10 to
-  25 MB behind another window or minimized (release build, 12 accounts).
+  its browser engine is handed back to Windows, and in front too once the
+  keyboard and mouse have been still for a few seconds: about 6 to 17 MB
+  while idle, 45 to 60 MB while you are scrolling and switching tabs
+  (release build, 12 accounts).
 - **Diagnostics.** A crash history that says how each client ended
   (disconnected, crashed, replaced, sign-in refused) with the reason from its
   log, CSV export and a link to the log. A client you close yourself is not
