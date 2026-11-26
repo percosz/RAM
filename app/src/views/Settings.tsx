@@ -183,6 +183,9 @@ export function SettingsView({ onNeedUnlock, onShowUpdate, onShowTour }: { onNee
             <div className="hint">Compact shows one line per account; the others show the alias and description underneath.</div>
           </div>
           <Toggle checked={settings.always_on_top} onChange={(c) => saveSettings({ always_on_top: c })} label="Always on top" hint="Keeps RAM's window above every other window, Roblox clients included, until you turn this off. A game in exclusive fullscreen still covers it." />
+          <Toggle checked={settings.streamer_mode} onChange={(c) => saveSettings({ streamer_mode: c })} label="Streamer mode"
+            hint="RAM's window does not appear at all in recordings, streams and screenshots (OBS, Discord, the Windows tools): viewers see whatever is behind it, while you see it as usual. Names in RAM's notifications are masked too. Works at once, no restart. Needs Windows 10 version 2004 or newer; a capture card or a camera pointed at the screen still sees the window, and Roblox's own windows are not hidden." />
+          <Toggle checked={settings.gpu_rendering} onChange={(c) => saveSettings({ gpu_rendering: c })} label="Draw RAM with the graphics card" hint="Off, RAM's window is drawn by the processor: about 25 MB less memory, and the graphics card is left to Roblox. Turn it on if scrolling or animations feel slow. Applies the next time RAM starts." />
           <Toggle checked={settings.hide_usernames} onChange={(c) => saveSettings({ hide_usernames: c })} label="Hide names" hint="For screenshots and streams: usernames and aliases show only their first three characters, and avatars, Robux and user IDs are hidden." />
           <div className="kv">
             <span>Corners</span>

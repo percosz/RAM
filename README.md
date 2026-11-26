@@ -109,7 +109,15 @@ auto-updater verifies every update against RAM's own release signature.
 - **Stays responsive.** RAM runs above normal priority, keeps its own memory
   from being paged out and never does work on its window's thread, so the
   window still answers with dozens of clients open. Minimized, it stops
-  drawing and gives memory back.
+  drawing.
+- **Streamer mode.** One switch keeps RAM's window out of recordings,
+  streams and screenshots altogether (OBS, Discord, the Windows tools):
+  viewers see what is behind it, you see it as usual. Names in RAM's
+  notifications are masked while it is on.
+- **Small in memory.** RAM's window is drawn by the processor, not the
+  graphics card, and whenever RAM is not the window in front the memory of
+  its browser engine is handed back to Windows: about 78 MB in front, 10 to
+  25 MB behind another window or minimized (release build, 12 accounts).
 - **Diagnostics.** A crash history that says how each client ended
   (disconnected, crashed, replaced, sign-in refused) with the reason from its
   log, CSV export and a link to the log. A client you close yourself is not

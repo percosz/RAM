@@ -4,6 +4,18 @@ RAM follows [Keep a Changelog](https://keepachangelog.com/) and semantic
 versions. The section for the running version is what "What's new" shows
 after an update; the release body on GitHub is generated from it.
 
+## 0.7.1 (2026-11-26)
+
+### New
+- **Streamer mode** (Settings → Appearance): RAM's window does not appear at all in recordings, streams and screenshots: OBS, Discord screen share, the Windows tools. Viewers see whatever is behind it; you see it as usual. It switches at once, the status bar shows **Hidden from capture** while it is on, and names in RAM's notifications are masked too. Needs Windows 10 version 2004 or newer. A capture card or a camera pointed at the screen still sees the window, and Roblox's own windows are not hidden.
+
+### Changed
+- **RAM uses much less memory.** Measured on the release build with 12 accounts, as Task Manager's Memory column shows it (RAM plus its built-in browser engine):
+  - **In front:** about 78 MB, down from about 105 MB. RAM's window is now drawn by the processor, so the engine's graphics process shrinks from about 40 MB to 9-17 MB and the graphics card is left to Roblox. Scrolling stayed smooth in testing; it costs more processor time only while something is moving. **Draw RAM with the graphics card** (Settings → Appearance) turns it back on.
+  - **Behind another window:** about 25 MB a few seconds after you switch away and 10-15 MB after a minute, down from about 105 MB. Once RAM has not been the window in front for 6 seconds, the engine's memory is handed back to Windows, and again every 30 seconds; what the page still uses comes straight back, the rest stays free for the game clients.
+  - **Minimized:** 10-20 MB, down from about 30-40 MB.
+  RAM.exe itself (about 5 MB here) is left in memory on purpose, so the window answers at once when you come back.
+
 ## 0.7.0 (2026-11-25)
 
 ### New

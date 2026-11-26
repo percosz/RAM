@@ -102,8 +102,13 @@ pub fn run() {
             // The window is created here, not from the configuration, so it
             // can be made see-through when a backdrop is turned on.
             let build = ram_win::launcher_info::windows_build();
-            let (wanted, on_top) = app.state::<Shared>().lock().map(|s| (s.store.settings.backdrop.clone(), s.store.settings.always_on_top)).unwrap_or_default();
-            let backdrop = window::create_main(app.handle(), &wanted, build, on_top)?;
+            let (wanted, on_top, gpu, streamer) = app
+                .state::<Shared>()
+                .lock()
+                .map(|s| (s.store.settings.backdrop.clone(), s.store.settings.always_on_top, s.store.settings.gpu_rendering, s.store.settings.streamer_mode))
+                .unwrap_or_default();
+            let gpu = window::gpu_for_this_run(gpu, std::env::var(window::GPU_OVERRIDE).ok().as_deref());
+            let backdrop = window::create_main(app.handle(), &wanted, build, on_top, gpu, streamer)?;
             if let Ok(mut s) = app.state::<Shared>().lock() {
                 s.backdrop = backdrop;
                 s.windows_build = build;
