@@ -142,6 +142,7 @@ function Shell() {
           <button className="sb-btn" onClick={() => void allClients(true)} title="Minimize every open Roblox client, Main included. Never takes focus from the window you are in.">Minimize all</button>
           <button className="sb-btn" onClick={() => void allClients(false)} title="Bring every minimized Roblox client back.">Restore all</button>
         </span>
+        {snap?.settings.streamer_mode && <span className="accent" title="Streamer mode is on: this window is left out of recordings, streams and screenshots. Turn it off in Settings.">Hidden from capture</span>}
         {snap?.startup_note && <span className="warn ellipsis" title={snap.startup_note}>{snap.startup_note}</span>}
         <span className="legend">
           <span className="good"><i className="dot" /> valid</span>

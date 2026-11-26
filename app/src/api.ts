@@ -81,6 +81,10 @@ export interface Settings {
   /** Keep RAM's window above every other window. */
   always_on_top: boolean;
   notify_ended: boolean;
+  /** RAM's window is left out of screen captures; notification names are masked. */
+  streamer_mode: boolean;
+  /** Let RAM's own window use the graphics card (applies at the next start). */
+  gpu_rendering: boolean;
   /** Percent of the theme's colour over the desktop when a backdrop is on. */
   backdrop_tint: number;
   /** "" follows the Windows default browser; otherwise a browser's full path. */

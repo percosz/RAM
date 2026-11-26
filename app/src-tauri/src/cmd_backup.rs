@@ -173,6 +173,7 @@ pub fn backup_restore(app: AppHandle, state: State<'_, Shared>, path: String, pa
     s.diag.rejoin.clear();
     s.apply_multi_instance();
     crate::window::set_always_on_top(&app, s.store.settings.always_on_top);
+    crate::window::set_streamer_mode(&app, s.store.settings.streamer_mode);
     s.save();
     s.log.info(&format!("backup: restored {} accounts, {} cookies, {} passwords", summary.accounts, summary.cookies, summary.passwords));
     Ok(format!(

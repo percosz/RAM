@@ -121,6 +121,10 @@ pub fn set_settings(app: AppHandle, state: State<'_, Shared>, settings: Settings
     if s.store.settings.always_on_top != settings.always_on_top {
         crate::window::set_always_on_top(&app, settings.always_on_top);
     }
+    if s.store.settings.streamer_mode != settings.streamer_mode {
+        crate::window::set_streamer_mode(&app, settings.streamer_mode);
+        s.log.info(&format!("streamer mode {}", if settings.streamer_mode { "on: the window is left out of screen captures" } else { "off" }));
+    }
     s.store.settings = settings;
     if multi_changed {
         s.apply_multi_instance();

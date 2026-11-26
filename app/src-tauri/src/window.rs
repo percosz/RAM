@@ -33,11 +33,29 @@ pub fn backdrop_for(wanted: &str, build: u32) -> &'static str {
     }
 }
 
+/// Command-line switches for the window's browser engine (WebView2).
+///
+/// The first is what Tauri passes by default. `--disable-gpu` makes the
+/// engine draw the page with the processor: measured on the release build,
+/// its GPU process drops from about 40 MB to 9-17 MB, and the graphics card
+/// is left to the game clients. The page is mostly still, so the cost is
+/// small; `gpu` turns the graphics card back on.
+pub fn browser_args(gpu: bool) -> String {
+    let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+    if !gpu {
+        args.push_str(" --disable-gpu");
+    }
+    args
+}
+
 /// Creates the main window from the configuration and returns the backdrop
 /// it was given ("" for the normal opaque window).
-pub fn create_main(app: &AppHandle, wanted: &str, build: u32, always_on_top: bool) -> tauri::Result<&'static str> {
+pub fn create_main(app: &AppHandle, wanted: &str, build: u32, always_on_top: bool, gpu: bool, streamer: bool) -> tauri::Result<&'static str> {
     let mut config = app.config().app.windows.first().cloned().unwrap_or_default();
     config.always_on_top = always_on_top;
+    config.content_protected = streamer;
+    // Until the window says it is in front, it counts as in the background.
+    BACKGROUND_SINCE.store(unix_now(), std::sync::atomic::Ordering::SeqCst);
     let backdrop = backdrop_for(wanted, build);
     if !backdrop.is_empty() {
         // No background colour at all: Windows ignores the alpha of a window
@@ -46,23 +64,98 @@ pub fn create_main(app: &AppHandle, wanted: &str, build: u32, always_on_top: boo
         config.background_color = None;
         config.transparent = true;
     }
-    let mut builder = WebviewWindowBuilder::from_config(app, &config)?;
-    let effect = match backdrop {
-        "mica" => Some(Effect::Mica),
-        "acrylic" => Some(Effect::Acrylic),
-        _ => None,
-    };
-    if let Some(effect) = effect {
-        builder = builder.effects(EffectsBuilder::new().effect(effect).build());
+    // WebView2 refuses to start with switches that differ from those of an
+    // engine still running on the same profile ("not in the correct state").
+    // That engine is normally RAM's own from a moment ago (a restart after
+    // the graphics-card setting changed, or an update), and is gone within a
+    // second or two: wait for it. If it stays (another RAM is open with the
+    // other setting), RAM starts itself again with that engine's switches:
+    // a window that draws the other way is better than no window. (Trying
+    // the other switches in this same process does not work: WebView2 keeps
+    // refusing once a process has asked for different ones.)
+    let mut last = None;
+    config.additional_browser_args = Some(browser_args(gpu));
+    for wait_ms in RETRY_WAITS_MS {
+        if wait_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+        }
+        let mut builder = WebviewWindowBuilder::from_config(app, &config)?;
+        let effect = match backdrop {
+            "mica" => Some(Effect::Mica),
+            "acrylic" => Some(Effect::Acrylic),
+            _ => None,
+        };
+        if let Some(effect) = effect {
+            builder = builder.effects(EffectsBuilder::new().effect(effect).build());
+        }
+        match builder.build() {
+            Ok(_) => {
+                if let Some(e) = last {
+                    eprintln!("RAM: the window opened on a later attempt (first error: {e})");
+                }
+                return Ok(backdrop);
+            }
+            Err(e) => {
+                // A window whose page could not be created must not stay behind.
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.destroy();
+                }
+                last = Some(e);
+            }
+        }
     }
-    builder.build()?;
-    Ok(backdrop)
+    // Once only: a copy started this way does not start another.
+    if std::env::var_os(GPU_OVERRIDE).is_none() {
+        if let Ok(exe) = std::env::current_exe() {
+            if std::process::Command::new(exe).env(GPU_OVERRIDE, if gpu { "off" } else { "on" }).spawn().is_ok() {
+                std::process::exit(0);
+            }
+        }
+    }
+    Err(last.unwrap_or(tauri::Error::WindowNotFound))
+}
+
+/// Waits before each try at creating the window: at once, then again over
+/// about three seconds.
+const RETRY_WAITS_MS: [u64; 6] = [0, 300, 500, 700, 800, 800];
+
+/// Environment variable RAM sets for the copy of itself it starts when the
+/// window could not be created with the wanted engine switches: "on" or
+/// "off" for the graphics card, for that run only.
+pub const GPU_OVERRIDE: &str = "RAM_ENGINE_GPU";
+
+/// Whether this run uses the graphics card: the override from a restart
+/// (see [`GPU_OVERRIDE`]) if there is one, else the setting.
+pub fn gpu_for_this_run(setting: bool, over: Option<&str>) -> bool {
+    match over {
+        Some("on") => true,
+        Some("off") => false,
+        _ => setting,
+    }
 }
 
 /// The last size the window had while it was a usable size.
 static LAST_GOOD: std::sync::Mutex<Option<tauri::PhysicalSize<u32>>> = std::sync::Mutex::new(None);
 /// Whether the page is currently parked (window minimized).
 static PARKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether WebView2 is currently asked to keep its memory use low.
+static LOW_MEMORY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// When the window stopped being the one in front (Unix seconds), or 0
+/// while it is in front.
+static BACKGROUND_SINCE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(1).max(1)
+}
+
+/// How long the window has not been the one in front (minimized, or behind
+/// another window, or simply not the active one); `None` while it is.
+pub fn background_secs() -> Option<i64> {
+    match BACKGROUND_SINCE.load(std::sync::atomic::Ordering::SeqCst) {
+        0 => None,
+        since => Some((unix_now() - since).max(0)),
+    }
+}
 
 /// Smaller than this (logical pixels) is not a size anyone chose: the
 /// window's minimum is 900x560.
@@ -78,23 +171,33 @@ pub fn is_unusable(size: tauri::PhysicalSize<u32>, scale: f64) -> bool {
 /// - If it ever comes back from being minimized (or from a busy spell) at
 ///   an unusably small size, it is put back to the last good size.
 /// - While it is minimized the page is parked: it stops drawing, its timers
-///   slow down, it fetches nothing, and WebView2 is asked to give memory
-///   back. All of that is undone when the window is shown again.
+///   slow down and it fetches nothing. Undone when the window is shown again.
+/// - While it is not the window in front (minimized or not), WebView2 is
+///   asked to keep its memory low, and the watcher hands the engine's
+///   unused memory back to Windows (see `background_secs`).
 pub fn on_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    use std::sync::atomic::Ordering;
     if window.label() != "main" {
         return;
     }
-    if let tauri::WindowEvent::Focused(true) = event {
-        // A second chance to wake the page, should a restore ever arrive
-        // without a size change.
-        if !window.is_minimized().unwrap_or(false) {
+    if let tauri::WindowEvent::Focused(focused) = event {
+        let minimized = window.is_minimized().unwrap_or(false);
+        BACKGROUND_SINCE.store(if *focused { 0 } else { unix_now() }, Ordering::SeqCst);
+        if *focused && !minimized {
+            // Also a second chance to wake the page, should a restore ever
+            // arrive without a size change.
             park(window.app_handle(), false);
         }
+        set_low_memory(window.app_handle(), !*focused || minimized);
         return;
     }
     let tauri::WindowEvent::Resized(size) = event else { return };
     let minimized = window.is_minimized().unwrap_or(false) || size.width == 0 || size.height == 0;
     park(window.app_handle(), minimized);
+    if minimized {
+        let _ = BACKGROUND_SINCE.compare_exchange(0, unix_now(), Ordering::SeqCst, Ordering::SeqCst);
+        set_low_memory(window.app_handle(), true);
+    }
     if minimized || window.is_maximized().unwrap_or(false) {
         return;
     }
@@ -117,14 +220,26 @@ pub fn on_event(window: &tauri::Window, event: &tauri::WindowEvent) {
 }
 
 /// Parks the page while nobody can see the window, or wakes it again.
-/// Parked, WebView2 treats the page as hidden (`document.hidden`), stops
-/// drawing it, and is asked to keep its memory use low. Measured on the
-/// release build: the engine's memory is trimmed once about 25 s after
-/// minimizing (to a few MB), then settles at roughly two thirds of what it
-/// uses while visible as its own housekeeping touches memory again.
-fn park(app: &AppHandle, low: bool) {
+/// Parked, WebView2 treats the page as hidden (`document.hidden`) and stops
+/// drawing it.
+fn park(app: &AppHandle, parked: bool) {
     use std::sync::atomic::Ordering;
-    if PARKED.swap(low, Ordering::SeqCst) == low {
+    if PARKED.swap(parked, Ordering::SeqCst) == parked {
+        return;
+    }
+    #[cfg(windows)]
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.with_webview(move |webview| unsafe {
+            let _ = webview.controller().SetIsVisible(!parked);
+        });
+    }
+}
+
+/// Asks WebView2 to keep its memory use low (its own caches and a one-time
+/// trim), or to go back to normal.
+fn set_low_memory(app: &AppHandle, low: bool) {
+    use std::sync::atomic::Ordering;
+    if LOW_MEMORY.swap(low, Ordering::SeqCst) == low {
         return;
     }
     #[cfg(windows)]
@@ -134,7 +249,6 @@ fn park(app: &AppHandle, low: bool) {
             use windows_core::Interface;
             let level = if low { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL };
             unsafe {
-                let _ = webview.controller().SetIsVisible(!low);
                 if let Ok(core) = webview.controller().CoreWebView2() {
                     if let Ok(v19) = core.cast::<ICoreWebView2_19>() {
                         let _ = v19.SetMemoryUsageTargetLevel(level);
@@ -151,6 +265,16 @@ fn park(app: &AppHandle, low: bool) {
 pub fn set_window_theme(app: AppHandle, dark: bool) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.set_theme(Some(if dark { Theme::Dark } else { Theme::Light }));
+    }
+}
+
+/// Streamer mode: leaves the window out of every screen capture, or puts it
+/// back. Windows does this itself (`WDA_EXCLUDEFROMCAPTURE`, Windows 10
+/// version 2004 and newer): recorders, streams and screenshots get whatever
+/// is behind the window, while the screen shows it as usual.
+pub fn set_streamer_mode(app: &AppHandle, on: bool) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_content_protected(on);
     }
 }
 
@@ -177,6 +301,27 @@ pub fn restart_app(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_restart_override_wins_over_the_setting_for_one_run() {
+        assert!(gpu_for_this_run(false, Some("on")));
+        assert!(!gpu_for_this_run(true, Some("off")));
+        assert!(gpu_for_this_run(true, None) && !gpu_for_this_run(false, None));
+        assert!(!gpu_for_this_run(false, Some("nonsense")));
+        assert_eq!(RETRY_WAITS_MS[0], 0, "the first try is immediate");
+        let waited: u64 = RETRY_WAITS_MS.iter().sum();
+        assert!((2500..=4000).contains(&waited), "waits about three seconds in all, not {waited} ms");
+    }
+
+    #[test]
+    fn the_graphics_card_is_off_unless_asked_for() {
+        assert!(browser_args(false).ends_with(" --disable-gpu"));
+        assert!(!browser_args(true).contains("gpu"));
+        // Tauri's own defaults are kept either way.
+        for gpu in [false, true] {
+            assert!(browser_args(gpu).starts_with("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"));
+        }
+    }
 
     #[test]
     fn only_sizes_nobody_would_choose_count_as_unusable() {

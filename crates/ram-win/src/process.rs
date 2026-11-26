@@ -47,11 +47,24 @@ pub const STORE_PATH_MARKER: &str = "ROBLOXCORPORATION";
 /// manager's own window answering. Returns how many processes were raised.
 /// Only this program's own process tree is touched.
 pub fn boost_own_processes() -> usize {
-    let me = unsafe { GetCurrentProcessId() };
     let mut raised = 0;
     if unsafe { SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS) }.is_ok() {
         raised += 1;
     }
+    for pid in own_webviews() {
+        if let Ok(h) = open_process(pid, PROCESS_SET_INFORMATION) {
+            if unsafe { SetPriorityClass(h.raw(), ABOVE_NORMAL_PRIORITY_CLASS) }.is_ok() {
+                raised += 1;
+            }
+        }
+    }
+    raised
+}
+
+/// The WebView2 processes this program started (its window's browser
+/// engine), at any depth below it.
+fn own_webviews() -> Vec<u32> {
+    let me = unsafe { GetCurrentProcessId() };
     // (pid, parent pid, image name) of every process.
     let mut all: Vec<(u32, u32, String)> = Vec::new();
     if let Ok(snapshot) = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) } {
@@ -63,14 +76,27 @@ pub fn boost_own_processes() -> usize {
             more = unsafe { Process32NextW(snapshot.raw(), &mut entry) }.is_ok();
         }
     }
-    for pid in descendants_of(me, &all, "msedgewebview2.exe") {
-        if let Ok(h) = open_process(pid, PROCESS_SET_INFORMATION) {
-            if unsafe { SetPriorityClass(h.raw(), ABOVE_NORMAL_PRIORITY_CLASS) }.is_ok() {
-                raised += 1;
+    descendants_of(me, &all, "msedgewebview2.exe")
+}
+
+/// Hands the memory of RAM's own browser engine back to Windows
+/// (`EmptyWorkingSet` on each of its WebView2 processes). What the engine
+/// touches again comes straight back; what it does not need stays free for
+/// the game clients. Meant for while RAM is not the window in front.
+/// RAM.exe itself is left alone (see [`keep_resident`]). Returns how many
+/// processes were trimmed.
+pub fn trim_own_webviews() -> usize {
+    use windows::Win32::System::ProcessStatus::K32EmptyWorkingSet;
+    use windows::Win32::System::Threading::PROCESS_SET_QUOTA;
+    let mut trimmed = 0;
+    for pid in own_webviews() {
+        if let Ok(h) = open_process(pid, PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION) {
+            if unsafe { K32EmptyWorkingSet(h.raw()) }.as_bool() {
+                trimmed += 1;
             }
         }
     }
-    raised
+    trimmed
 }
 
 /// Tells Windows not to page RAM's own memory out. When dozens of game

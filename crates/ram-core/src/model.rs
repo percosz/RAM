@@ -597,6 +597,14 @@ pub struct Settings {
     pub backdrop: String,
     /// Keep RAM's window above every other window.
     pub always_on_top: bool,
+    /// Streamer mode: RAM's window is left out of screen captures
+    /// (recordings, streams, screenshots) altogether, and names in its
+    /// notifications are masked.
+    pub streamer_mode: bool,
+    /// Let RAM's own window use the graphics card. Off by default: the
+    /// window is drawn by the processor, which saves the browser engine's
+    /// GPU process most of its memory. Takes effect at the next start.
+    pub gpu_rendering: bool,
     /// Show a Windows notification when a client is disconnected, crashes,
     /// is replaced by another sign-in, or has its sign-in refused.
     #[serde(default = "yes")]
@@ -645,6 +653,8 @@ impl Default for Settings {
             presence_every_secs: default_presence_secs(),
             backdrop: String::new(),
             always_on_top: false,
+            gpu_rendering: false,
+            streamer_mode: false,
             notify_ended: true,
             backdrop_tint: default_backdrop_tint(),
             browser: String::new(),

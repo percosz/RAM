@@ -258,6 +258,12 @@ fn find_log(dir: &Path, start: i64, skew: i64, taken: &[PathBuf], trackers: &[St
 }
 
 /// Starts the watcher thread.
+/// How long RAM must be out of front before its browser engine's memory is
+/// handed back (so a quick switch away and back costs nothing), and how
+/// often that is repeated while it stays there.
+const TRIM_AFTER_SECS: i64 = 6;
+const TRIM_EVERY_SECS: u64 = 30;
+
 pub fn spawn_watcher(app: AppHandle) {
     std::thread::spawn(move || {
         register_notifications(&app);
@@ -266,8 +272,23 @@ pub fn spawn_watcher(app: AppHandle) {
             s.log.debug(&format!("memory: RAM's own pages kept in memory: {kept}"));
         }
         let mut ticks: u32 = 0;
+        let mut trimmed: Option<std::time::Instant> = None;
         loop {
             std::thread::sleep(Duration::from_secs(2));
+            // While RAM is not the window in front, hand the memory of its
+            // browser engine back to Windows, and again every so often:
+            // what the page still uses comes straight back, the rest stays
+            // free for the game clients.
+            match crate::window::background_secs() {
+                Some(secs) if secs >= TRIM_AFTER_SECS => {
+                    if trimmed.map_or(true, |t| t.elapsed() >= Duration::from_secs(TRIM_EVERY_SECS)) {
+                        ram_win::process::trim_own_webviews();
+                        trimmed = Some(std::time::Instant::now());
+                    }
+                }
+                Some(_) => {}
+                None => trimmed = None,
+            }
             // Keep RAM's own window ahead of the game clients for CPU time.
             // Repeated because WebView2 starts new helper processes over time.
             if ticks % 30 == 1 {
@@ -652,7 +673,10 @@ fn tick(app: &AppHandle) {
         if w.account.is_none() {
             continue;
         }
-        ended_named.push((shown_name(&username, s.store.settings.hide_usernames), kind, uptime));
+        // A notification is drawn by Windows, outside RAM's window, so a
+        // stream would show it: streamer mode masks the name too.
+        let mask = s.store.settings.hide_usernames || s.store.settings.streamer_mode;
+        ended_named.push((shown_name(&username, mask), kind, uptime));
         s.store.push_crash(CrashRecord {
             id: 0,
             account: w.account,

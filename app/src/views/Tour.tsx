@@ -105,7 +105,7 @@ const STEPS: Step[] = [
     body: <ul>
       <li>Nearly thirty <b>themes</b>, from palettes to Windows XP, Vista and Frutiger Aero.</li>
       <li>A <b>see-through window</b>, with a slider for how much shows through.</li>
-      <li><b>Always on top</b> and <b>Hide names</b> are in the same place.</li>
+      <li><b>Always on top</b> and <b>Hide names</b> are in the same place, and so is <b>Streamer mode</b>, which keeps RAM's window out of recordings and streams altogether.</li>
     </ul>,
   },
   {
